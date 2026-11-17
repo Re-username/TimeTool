@@ -1,0 +1,130 @@
+@namespace TimeTool.Pages
+@page "/calc"
+
+<PageTitle>Расчёт времени</PageTitle>
+
+<div class="page">
+    <h2>Расчёт времени</h2>
+
+    <div class="calc-grid">
+        <section class="panel">
+            <h3>Разница между моментами</h3>
+            <label>Начало<input type="datetime-local" @bind="StartValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+            <label>Конец<input type="datetime-local" @bind="EndValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+            @if (Diff.HasValue)
+            {
+                <div class="result">
+                    <div class="result-main">@FormatDiff(Diff.Value)</div>
+                    <div class="result-detail">
+                        итого: @Diff.Value.TotalDays.ToString("0.###") дней ·
+                        @Diff.Value.TotalHours.ToString("0.#") часов ·
+                        @Diff.Value.TotalMinutes.ToString("0") минут ·
+                        @Diff.Value.TotalSeconds.ToString("0") секунд
+                    </div>
+                </div>
+            }
+        </section>
+
+        <section class="panel">
+            <h3>Сдвиг даты</h3>
+            <label>Исходная дата и время<input type="datetime-local" @bind="BaseValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+            <div class="shift-row">
+                <label>Интервал<input type="number" min="0" @bind="ShiftValue" /></label>
+                <label>Единицы
+                    <select @bind="ShiftUnit">
+                        <option value="minutes">минуты</option>
+                        <option value="hours">часы</option>
+                        <option value="days">дни</option>
+                        <option value="weeks">недели</option>
+                        <option value="months">месяцы</option>
+                        <option value="years">годы</option>
+                    </select>
+                </label>
+                <label>Направление
+                    <select @bind="ShiftSign">
+                        <option value="+">плюс (+)</option>
+                        <option value="-">минус (−)</option>
+                    </select>
+                </label>
+            </div>
+            @if (ShiftError is not null)
+            {
+                <div class="alert error">@ShiftError</div>
+            }
+            else if (ShiftResult.HasValue)
+            {
+                <div class="result">
+                    <div class="result-main">@ShiftResult.Value.ToString("dd.MM.yyyy HH:mm ddd")</div>
+                    <div class="result-detail">@BaseValue.ToString("dd.MM.yyyy HH:mm") @(ShiftSign == "-" ? "−" : "+") @ShiftValue @UnitName</div>
+                </div>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    public DateTime StartValue { get; set; } = DateTime.Today.AddHours(8);
+    public DateTime EndValue { get; set; } = DateTime.Today.AddHours(17);
+    public DateTime BaseValue { get; set; } = DateTime.Now;
+
+    public int ShiftValue { get; set; } = 14;
+    public string ShiftUnit { get; set; } = "days";
+    public string ShiftSign { get; set; } = "+";
+
+    private TimeSpan? Diff => EndValue >= StartValue ? EndValue - StartValue : StartValue - EndValue;
+
+    private string? ShiftError
+    {
+        get
+        {
+            if (ShiftValue < 0)
+                return "Интервал не может быть отрицательным.";
+            return null;
+        }
+    }
+
+    private DateTime? ShiftResult
+    {
+        get
+        {
+            if (ShiftValue < 0)
+                return null;
+            if (ShiftUnit == "months")
+                return ShiftSign == "-" ? BaseValue.AddMonths(-ShiftValue) : BaseValue.AddMonths(ShiftValue);
+            if (ShiftUnit == "years")
+                return ShiftSign == "-" ? BaseValue.AddYears(-ShiftValue) : BaseValue.AddYears(ShiftValue);
+            var amount = ShiftUnit switch
+            {
+                "hours" => TimeSpan.FromHours(ShiftValue),
+                "days" => TimeSpan.FromDays(ShiftValue),
+                "weeks" => TimeSpan.FromDays(ShiftValue * 7),
+                _ => TimeSpan.FromMinutes(ShiftValue),
+            };
+            return ShiftSign == "-" ? BaseValue - amount : BaseValue + amount;
+        }
+    }
+
+    private string UnitName => ShiftUnit switch
+    {
+        "hours" => "час.",
+        "days" => "дн.",
+        "weeks" => "нед.",
+        "months" => "мес.",
+        "years" => "г.",
+        _ => "мин.",
+    };
+
+    private static string FormatDiff(TimeSpan d)
+    {
+        var days = (int)d.TotalDays;
+        var h = d.Hours;
+        var m = d.Minutes;
+        var parts = new List<string>();
+        if (days > 0)
+            parts.Add($"{days} {(days % 10 == 1 && days % 100 != 11 ? "день" : days % 10 is >= 2 and <= 4 && (days % 100 < 10 || days % 100 >= 20) ? "дня" : "дней")}");
+        if (h > 0 || days > 0)
+            parts.Add($"{h} {(h % 10 == 1 && h % 100 != 11 ? "час" : h % 10 is >= 2 and <= 4 && (h % 100 < 10 || h % 100 >= 20) ? "часа" : "часов")}");
+        parts.Add($"{m} {(m % 10 == 1 && m % 100 != 11 ? "минута" : m % 10 is >= 2 and <= 4 && (m % 100 < 10 || m % 100 >= 20) ? "минуты" : "минут")}");
+        return string.Join(" ", parts);
+    }
+}

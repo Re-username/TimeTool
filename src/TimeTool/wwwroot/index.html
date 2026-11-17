@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>TimeTool</title>
+    <base href="./" />
+    <link rel="stylesheet" href="css/app.css" />
+    <script src="js/app.js"></script>
+    <script>
+        // Тема до отрисовки, чтобы не было вспышки светлой темы
+        (function () {
+            var t = null;
+            try { t = localStorage.getItem("timetool-theme"); } catch (e) { }
+            if (t !== "dark" && t !== "light") t = "dark";
+            document.documentElement.classList.toggle("dark", t === "dark");
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="loading-screen">
+            <div class="spinner"></div>
+            <div>Загрузка TimeTool…</div>
+            <div id="boot-error" style="display:none;max-width:85%;color:#e5534b;font-size:13px;text-align:left;white-space:pre-wrap;"></div>
+        </div>
+    </div>
+    <script>
+        // Если Blazor не стартовал — показываем ошибку вместо бесконечного спиннера.
+        (function () {
+            function show(msg) {
+                var el = document.getElementById('boot-error');
+                if (!el) return;
+                el.style.display = 'block';
+                el.textContent += msg + '\n';
+            }
+            window.addEventListener('error', function (e) {
+                show((e.message || 'Ошибка загрузки') + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : ''));
+            }, true);
+            window.addEventListener('unhandledrejection', function (e) {
+                show('Promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason));
+            });
+        })();
+    </script>
+    <script src="_framework/blazor.webview.js"></script>
+</body>
+
+</html>

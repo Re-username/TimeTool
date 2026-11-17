@@ -1,0 +1,220 @@
+@namespace TimeTool.Pages
+@page "/timer"
+@inject IJSRuntime JS
+
+<PageTitle>Таймер</PageTitle>
+
+<div class="page" tabindex="0" @onkeydown="OnKeyDown" @ref="PageDiv">
+    <h2>Таймер обратного отсчёта</h2>
+
+    <div class="duration-row">
+        <label>Часы<input type="number" min="0" max="999" @bind="Hours" disabled="@IsRunning" /></label>
+        <label>Минуты<input type="number" min="0" max="59" @bind="Minutes" disabled="@IsRunning" /></label>
+        <label>Секунды<input type="number" min="0" max="59" @bind="Seconds" disabled="@IsRunning" /></label>
+    </div>
+
+    <div class="presets">
+        @foreach (var p in Presets)
+        {
+            <button type="button" class="btn" @onclick="() => SetPreset(p)" disabled="@IsRunning">@PresetText(p)</button>
+        }
+    </div>
+
+    <div class="big-display @(Finished ? "finished" : "")">@Display</div>
+
+    <div class="progress"><div class="progress-bar" style="width: @ProgressPercent%"></div></div>
+
+    <div class="controls">
+        @if (!IsRunning && !IsPaused)
+        {
+            <button type="button" class="btn primary" @onclick="Start" disabled="@(Total == TimeSpan.Zero)">Старт</button>
+        }
+        else if (IsRunning)
+        {
+            <button type="button" class="btn" @onclick="Pause">Пауза</button>
+            <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
+        }
+        else
+        {
+            <button type="button" class="btn primary" @onclick="Resume">Продолжить</button>
+            <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
+        }
+    </div>
+</div>
+
+@code {
+    private ElementReference PageDiv;
+    private static readonly (int h, int m, int s)[] Presets = { (0, 1, 0), (0, 5, 0), (0, 15, 0), (0, 30, 0), (1, 0, 0) };
+
+    private int Hours { get; set; }
+    private int Minutes { get; set; } = 5;
+    private int Seconds { get; set; }
+
+    private TimeSpan Total = TimeSpan.FromMinutes(5);
+    private TimeSpan Remaining = TimeSpan.FromMinutes(5);
+    private DateTime _endAt;
+    private bool _loopActive;
+    private bool _disposed;
+
+    private bool IsRunning { get; set; }
+    private bool IsPaused { get; set; }
+    private bool Finished { get; set; }
+
+    private string Display => Remaining < TimeSpan.Zero ? TimeSpan.Zero.ToString(@"hh\:mm\:ss") : Remaining.ToString(@"hh\:mm\:ss");
+    private int ProgressPercent => Total == TimeSpan.Zero ? 0 : Math.Min(100, (int)(100 * (1 - Remaining.TotalSeconds / Total.TotalSeconds)));
+
+    protected override void OnInitialized()
+    {
+        _ = RestoreAsync();
+    }
+
+    private async Task RestoreAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", "timetool-timer");
+            if (!string.IsNullOrEmpty(json))
+            {
+                var s = System.Text.Json.JsonSerializer.Deserialize<SavedTimer>(json);
+                if (s is not null)
+                {
+                    Hours = s.Hours;
+                    Minutes = s.Minutes;
+                    Seconds = s.Seconds;
+                    RecalcTotal();
+                    Remaining = Total;
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void RecalcTotal()
+    {
+        Total = new TimeSpan(Math.Max(0, Hours), Math.Clamp(Minutes, 0, 59), Math.Clamp(Seconds, 0, 59));
+        if (Total > new TimeSpan(999, 59, 59))
+            Total = new TimeSpan(999, 59, 59);
+    }
+
+    private static string PresetText((int h, int m, int s) p)
+    {
+        var parts = new List<string>();
+        if (p.h > 0)
+            parts.Add($"{p.h} ч");
+        if (p.m > 0)
+            parts.Add($"{p.m} мин");
+        if (p.s > 0)
+            parts.Add($"{p.s} с");
+        return string.Join(" ", parts);
+    }
+
+    private void SetPreset((int h, int m, int s) p)
+    {
+        Hours = p.h;
+        Minutes = p.m;
+        Seconds = p.s;
+        RecalcTotal();
+        Remaining = Total;
+        Finished = false;
+    }
+
+    private void Start()
+    {
+        RecalcTotal();
+        if (Total == TimeSpan.Zero)
+            return;
+        Remaining = Total;
+        BeginCountdown();
+    }
+
+    private void Resume() => BeginCountdown();
+
+    private void BeginCountdown()
+    {
+        Finished = false;
+        IsPaused = false;
+        IsRunning = true;
+        _endAt = DateTime.Now + Remaining;
+        _ = TickLoop();
+    }
+
+    private void Pause()
+    {
+        IsRunning = false;
+        IsPaused = true;
+    }
+
+    private void Reset()
+    {
+        IsRunning = false;
+        IsPaused = false;
+        Finished = false;
+        Remaining = Total;
+        _ = SaveAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(new SavedTimer { Hours = Hours, Minutes = Minutes, Seconds = Seconds });
+            await JS.InvokeVoidAsync("localStorage.setItem", "timetool-timer", json);
+        }
+        catch { }
+    }
+
+    private async Task TickLoop()
+    {
+        if (_loopActive)
+            return;
+        _loopActive = true;
+        try
+        {
+            while (IsRunning && !_disposed)
+            {
+                Remaining = _endAt - DateTime.Now;
+                if (Remaining <= TimeSpan.Zero)
+                {
+                    Remaining = TimeSpan.Zero;
+                    IsRunning = false;
+                    Finished = true;
+                    try { await JS.InvokeVoidAsync("beep", 3); } catch { }
+                    _ = SaveAsync();
+                }
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(100);
+            }
+        }
+        catch (InvalidOperationException) { }
+        finally
+        {
+            _loopActive = false;
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != " " && e.Code != "Space")
+            return;
+        if (Finished)
+        {
+            Reset();
+            return;
+        }
+        if (IsRunning)
+            Pause();
+        else if (IsPaused)
+            Resume();
+        else
+            Start();
+        await Task.CompletedTask;
+    }
+
+    private sealed class SavedTimer
+    {
+        public int Hours { get; set; }
+        public int Minutes { get; set; }
+        public int Seconds { get; set; }
+    }
+}

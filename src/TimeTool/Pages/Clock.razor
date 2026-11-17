@@ -1,0 +1,153 @@
+@namespace TimeTool.Pages
+@page "/"
+@page "/clock"
+@inject IJSRuntime JS
+@inject Services.TimeState State
+
+<PageTitle>Часы</PageTitle>
+
+<div class="page">
+    <h2>Часы</h2>
+
+    <div class="big-display clock-display">
+        <div class="clock-time">@State.FormatTime(_now)</div>
+        <div class="clock-date">@_now.ToString("dddd, d MMMM yyyy", _ru)</div>
+        <div class="clock-tz">@State.TimeZone.DisplayName</div>
+    </div>
+
+    <div class="panel">
+        <div class="ntp-row">
+            <button type="button" class="btn" @onclick="SyncNtp" disabled="@_ntpBusy">@(_ntpBusy ? "Сверка…" : "Сверить с эталонным временем (NTP)")</button>
+            @if (_ntpMessage is not null)
+            {
+                <span class="ntp-msg @(_ntpOk ? "" : "err")">@_ntpMessage</span>
+            }
+        </div>
+        <div class="settings-grid">
+            <label>Часовой пояс
+                <select @bind="State.TimeZoneId" @bind:after="State.NotifyChanged">
+                    @foreach (var z in _zones)
+                    {
+                        <option value="@z.Id">@z.DisplayName</option>
+                    }
+                </select>
+            </label>
+            <label>Формат
+                <select @bind="_format" @bind:after="ApplyFormat">
+                    <option value="24">24 часа</option>
+                    <option value="12">12 часов (AM/PM)</option>
+                </select>
+            </label>
+            <label>Показывать секунды
+                <input type="checkbox" checked="@State.ShowSeconds" @onchange="ToggleSeconds" />
+            </label>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly System.Globalization.CultureInfo _ru = new("ru-RU");
+    private readonly IReadOnlyList<TimeZoneInfo> _zones = Services.TimeState.GetZones();
+
+    private DateTime _now;
+    private string _format = "24";
+    private bool _ntpBusy;
+    private bool _ntpOk;
+    private string? _ntpMessage;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        _ = LoadAsync();
+        _ = TickLoop();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", "timetool-clock");
+            if (!string.IsNullOrEmpty(json))
+            {
+                var s = System.Text.Json.JsonSerializer.Deserialize<ClockSettings>(json);
+                if (s is not null)
+                {
+                    if (!string.IsNullOrEmpty(s.TimeZoneId)) State.TimeZoneId = s.TimeZoneId;
+                    State.Use24Hours = s.Use24Hours;
+                    State.ShowSeconds = s.ShowSeconds;
+                    _format = s.Use24Hours ? "24" : "12";
+                }
+            }
+        }
+        catch { }
+        _now = State.NowInZone();
+        await InvokeAsync(StateHasChanged);
+        await SyncNtp(); // автоматическая сверка при открытии
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(new ClockSettings
+            {
+                TimeZoneId = State.TimeZoneId,
+                Use24Hours = State.Use24Hours,
+                ShowSeconds = State.ShowSeconds,
+            });
+            await JS.InvokeVoidAsync("localStorage.setItem", "timetool-clock", json);
+        }
+        catch { }
+    }
+
+    private async Task TickLoop()
+    {
+        while (!_disposed)
+        {
+            _now = State.NowInZone();
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(500);
+        }
+    }
+
+    private async Task SyncNtp()
+    {
+        if (_ntpBusy)
+            return;
+        _ntpBusy = true;
+        try
+        {
+            var r = await Services.TimeState.QueryNtpAsync();
+            _ntpOk = r.Ok;
+            _ntpMessage = r.Ok
+                ? r.Message
+                : r.Message;
+        }
+        finally
+        {
+            _ntpBusy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ApplyFormat()
+    {
+        State.Use24Hours = _format == "24";
+        State.NotifyChanged();
+        await SaveAsync();
+    }
+
+    private async Task ToggleSeconds(ChangeEventArgs e)
+    {
+        State.ShowSeconds = e.Value is bool b && b;
+        State.NotifyChanged();
+        await SaveAsync();
+    }
+
+    private sealed class ClockSettings
+    {
+        public string? TimeZoneId { get; set; }
+        public bool Use24Hours { get; set; } = true;
+        public bool ShowSeconds { get; set; } = true;
+    }
+}

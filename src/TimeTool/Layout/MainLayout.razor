@@ -1,0 +1,141 @@
+@namespace TimeTool.Layout
+
+@inherits LayoutComponentBase
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="layout">
+    <header class="header">
+        <h1>TimeTool</h1>
+        <nav class="tabs">
+            <NavLink href="/" Match="NavLinkMatch.All">Часы</NavLink>
+            <NavLink href="/timer">Таймер</NavLink>
+            <NavLink href="/until">До даты</NavLink>
+            <NavLink href="/stopwatch">Секундомер</NavLink>
+            <NavLink href="/calc">Калькулятор</NavLink>
+        </nav>
+        <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
+        <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
+    </header>
+
+    <main class="content" tabindex="0">
+        @Body
+    </main>
+</div>
+
+@if (HelpVisible)
+{
+    <div class="help-backdrop" @onclick="CloseHelp">
+        <section class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" @onclick:stopPropagation="true">
+            <div class="help-header">
+                <h2 id="help-title">Справка TimeTool</h2>
+                <button type="button" class="btn" @ref="HelpCloseButton" @onclick="CloseHelp" title="Закрыть (Esc)">Закрыть · Esc</button>
+            </div>
+            <div class="help-body">
+                <section>
+                    <h3>Часы и настройки</h3>
+                    <p>Текущее время в выбранном часовом поясе (список поясов планеты), формат 24/12 часов, показ секунд. Кнопка <strong>«Сверить с эталонным временем (NTP)»</strong> опрашивает интернет-сервер времени (pool.ntp.org) и показывает расхождение локальных часов с реальным временем; сверка выполняется автоматически при открытии вкладки. Настройки часов запоминаются.</p>
+                </section>
+                <section>
+                    <h3>Таймер (обратный отсчёт)</h3>
+                    <p>Задайте часы, минуты и секунды или нажмите быстрый пресет (1/5/15/30 минут, 1 час). «Старт» запускает отсчёт, «Пауза» — приостанавливает, «Сброс» — возвращает к заданному времени. По окончании звучит сигнал (три коротких звука) и время мигает. <kbd>Пробел</kbd> — старт/пауза. Последняя длительность запоминается.</p>
+                </section>
+                <section>
+                    <h3>Отсчёт до даты (календарь)</h3>
+                    <p>Выберите целевую дату в календаре (и необязательное время). Включите <strong>«повторять ежемесячно»</strong> — отсчёт будет идти до ближайшего N-го числа каждого месяца (например, до 25-го: после 25 декабря автоматически переключится на 25 января). Отсчёт обновляется каждую секунду по реальному времени; показаны остаток в днях/часах/минутах и точная цель.</p>
+                </section>
+                <section>
+                    <h3>Секундомер</h3>
+                    <p>«Старт»/«Пауза», «Круг» фиксирует промежуточное время без остановки (номер круга, время круга и суммарное), «Сброс» обнуляет и очищает круги. Точность отображения — сотые доли секунды. <kbd>Пробел</kbd> — старт/пауза.</p>
+                </section>
+                <section>
+                    <h3>Калькулятор времени и дат</h3>
+                    <ul>
+                        <li><strong>Разница между моментами</strong>: начало и конец (дата и время) — результат «N дней X часов Y минут» плюс общие суммы (дней/часов/минут/секунд). Конец раньше начала — разница считается по модулю.</li>
+                        <li><strong>Сдвиг даты</strong>: исходная дата-время плюс или минус интервал — минуты, часы, дни, недели, месяцы и годы (месяцы и годы считаются по календарю: 31.01 + 1 месяц = 28/29.02).</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>Общее</h3>
+                    <p>Тема (тёмная/светлая) запоминается. Горячие клавиши: <kbd>F1</kbd> — справка, <kbd>Esc</kbd> — закрыть справку.</p>
+                </section>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private bool IsDark = true;
+    private bool HelpVisible;
+    private bool _focusHelp;
+    private DotNetObjectReference<MainLayout>? _helpReference;
+    private ElementReference HelpCloseButton;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                IsDark = await JS.InvokeAsync<string>("getTheme") != "light";
+                _helpReference = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("timeToolHotkeys.init", _helpReference);
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or JSDisconnectedException) { }
+            StateHasChanged();
+        }
+
+        if (_focusHelp && HelpVisible)
+        {
+            _focusHelp = false;
+            try { await HelpCloseButton.FocusAsync(); } catch (JSException) { }
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        IsDark = !IsDark;
+        try { await JS.InvokeVoidAsync("setTheme", IsDark ? "dark" : "light"); } catch { }
+    }
+
+    private async Task OpenHelp()
+    {
+        HelpVisible = true;
+        _focusHelp = true;
+        try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+    }
+
+    private void CloseHelp() => HelpVisible = false;
+
+    [JSInvokable]
+    public async Task ShowHelpFromHotkey()
+    {
+        try { await InvokeAsync(OpenHelp); } catch (InvalidOperationException) { }
+    }
+
+    [JSInvokable]
+    public async Task CloseHelpFromHotkey()
+    {
+        try
+        {
+            await InvokeAsync(() =>
+            {
+                CloseHelp();
+                StateHasChanged();
+            });
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_helpReference != null)
+        {
+            try { await JS.InvokeVoidAsync("timeToolHotkeys.dispose"); }
+            catch (JSException) { }
+            catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
+            _helpReference.Dispose();
+        }
+    }
+}

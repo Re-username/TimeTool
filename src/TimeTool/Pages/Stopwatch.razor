@@ -1,0 +1,140 @@
+@namespace TimeTool.Pages
+@page "/stopwatch"
+@inject IJSRuntime JS
+
+<PageTitle>Секундомер</PageTitle>
+
+<div class="page" tabindex="0" @onkeydown="OnKeyDown">
+    <h2>Секундомер</h2>
+
+    <div class="big-display">@Elapsed.ToString(@"mm\:ss\.ff")</div>
+
+    <div class="controls">
+        @if (!IsRunning && !IsPaused)
+        {
+            <button type="button" class="btn primary" @onclick="Start">Старт</button>
+        }
+        else if (IsRunning)
+        {
+            <button type="button" class="btn" @onclick="Pause">Пауза</button>
+            <button type="button" class="btn" @onclick="Lap">Круг</button>
+            <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
+        }
+        else
+        {
+            <button type="button" class="btn primary" @onclick="Resume">Продолжить</button>
+            <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
+        }
+    </div>
+
+    @if (Laps.Count > 0)
+    {
+        <div class="laps">
+            <h3>Круги</h3>
+            <table>
+                <thead>
+                    <tr><th>№</th><th>Время круга</th><th>Суммарно</th></tr>
+                </thead>
+                <tbody>
+                    @for (var i = Laps.Count - 1; i >= 0; i--)
+                    {
+                        <tr>
+                            <td>@(i + 1)</td>
+                            <td>@Laps[i].Lap.ToString(@"mm\:ss\.ff")</td>
+                            <td>@Laps[i].Total.ToString(@"mm\:ss\.ff")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private TimeSpan Elapsed { get; set; }
+    private List<(TimeSpan Lap, TimeSpan Total)> Laps { get; } = new();
+    private DateTime _startedAt;
+    private TimeSpan _accumulated;
+    private bool _loopActive;
+    private bool _disposed;
+
+    private bool IsRunning { get; set; }
+    private bool IsPaused { get; set; }
+
+    private void Start()
+    {
+        Laps.Clear();
+        _accumulated = TimeSpan.Zero;
+        Elapsed = TimeSpan.Zero;
+        IsPaused = false;
+        IsRunning = true;
+        _startedAt = DateTime.Now;
+        _ = TickLoop();
+    }
+
+    private void Resume()
+    {
+        IsPaused = false;
+        IsRunning = true;
+        _startedAt = DateTime.Now;
+        _ = TickLoop();
+    }
+
+    private void Pause()
+    {
+        _accumulated += DateTime.Now - _startedAt;
+        Elapsed = _accumulated;
+        IsRunning = false;
+        IsPaused = true;
+    }
+
+    private void Reset()
+    {
+        IsRunning = false;
+        IsPaused = false;
+        _accumulated = TimeSpan.Zero;
+        Elapsed = TimeSpan.Zero;
+        Laps.Clear();
+    }
+
+    private void Lap()
+    {
+        var total = _accumulated + (DateTime.Now - _startedAt);
+        var lap = Laps.Count == 0 ? total : total - Laps[^1].Total;
+        Laps.Add((lap, total));
+    }
+
+    private async Task TickLoop()
+    {
+        if (_loopActive)
+            return;
+        _loopActive = true;
+        try
+        {
+            while (IsRunning && !_disposed)
+            {
+                Elapsed = _accumulated + (DateTime.Now - _startedAt);
+                await InvokeAsync(StateHasChanged);
+                await Task.Delay(47); // ~21 кадр/с, плавные сотые
+            }
+        }
+        catch (InvalidOperationException) { }
+        finally
+        {
+            _loopActive = false;
+        }
+    }
+
+    private Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != " " && e.Code != "Space")
+            return Task.CompletedTask;
+        if (IsRunning)
+            Pause();
+        else if (IsPaused)
+            Resume();
+        else
+            Start();
+        return Task.CompletedTask;
+    }
+}
