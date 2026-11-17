@@ -75,7 +75,16 @@ public static class TrayService
             new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero); // HWND_MESSAGE
         SetWindowLongPtr(_trayHwnd, GWL_WNDPROC, Marshal.GetFunctionPointerForDelegate(_trayProc));
 
-        var icon = LoadIcon(IntPtr.Zero, new IntPtr(0x7F00)); // IDI_APPLICATION
+        // иконка — из exe приложения (а не системная стрелка): на ней приложение узнаваемо
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(exe) &&
+                ExtractIconExW(exe, 0, out _, out var small, 1) > 0)
+                _hIcon = small;
+        }
+        catch { }
+
         var data = new NOTIFYICONDATAW
         {
             cbSize = Marshal.SizeOf<NOTIFYICONDATAW>(),
@@ -83,10 +92,26 @@ public static class TrayService
             uID = ID_ICON,
             uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = WM_TRAYCALLBACK,
-            hIcon = icon,
+            hIcon = _hIcon != IntPtr.Zero ? _hIcon : LoadIcon(IntPtr.Zero, new IntPtr(0x7F00)),
             szTip = "TimeTool — таймер и расчёт времени",
         };
-        Shell_NotifyIconW(NIM_ADD, ref data);
+        if (!Shell_NotifyIconW(NIM_ADD, ref data))
+            LogTray("Shell_NotifyIconW(NIM_ADD) вернул false");
+    }
+
+    private static IntPtr _hIcon;
+
+    private static void LogTray(string msg)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimeTool");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "tray.log"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {msg}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     private static IntPtr TrayWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -155,6 +180,9 @@ public static class TrayService
     [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATAW data);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint ExtractIconExW(string lpszFile, int nIconIndex, out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIcons);
 
     [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
 

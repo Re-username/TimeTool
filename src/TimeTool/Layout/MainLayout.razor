@@ -17,11 +17,7 @@
             <NavLink href="/clock">Часы</NavLink>
         </nav>
         <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
-        @if (_widgetSupported)
-        {
-            <button type="button" class="btn" @onclick="OpenWidget" title="Открыть виджет текущей вкладки (всегда сверху, для рабочего стола)">⧉ Виджет</button>
-        }
-        <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
+        <button type="button" class="btn btn-icon" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀" : "☾")</button>
     </header>
 
     @if (_reminder is not null)
@@ -91,11 +87,6 @@
 
 @code {
     private ErrorBoundary? _boundary;
-#if WINDOWS
-    private const bool _widgetSupported = true;
-#else
-    private const bool _widgetSupported = false;
-#endif
     private bool IsDark = true;
     private bool HelpVisible;
     private bool _focusHelp;
@@ -114,6 +105,10 @@
         _reminder = item;
         _reminderAt = at;
         try { await JS.InvokeVoidAsync("beep", 2); } catch { }
+#if WINDOWS
+        Platforms.Windows.ToastNotifier.Show($"TimeTool: {item.Name}",
+            DateTime.Now > at ? "Событие наступило!" : $"Осталось {FormatLeft(at - DateTime.Now)} (до {at:dd.MM.yyyy HH:mm})");
+#endif
         await InvokeAsync(StateHasChanged);
     }
 
@@ -159,16 +154,6 @@
         HelpVisible = true;
         _focusHelp = true;
         try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
-    }
-
-    private void OpenWidget()
-    {
-#if WINDOWS
-        var tab = Nav.Uri.TrimEnd('/').TrimStart('/');
-        if (tab == "")
-            tab = "events";
-        Platforms.Windows.WidgetWindows.Open(tab);
-#endif
     }
 
     private void CloseHelp() => HelpVisible = false;

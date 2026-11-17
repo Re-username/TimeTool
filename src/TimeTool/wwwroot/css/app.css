@@ -284,3 +284,14 @@ html.widget .panel { padding: 8px 10px; }
 .w-val { font-family: Consolas, monospace; color: var(--accent); white-space: nowrap; }
 .w-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .w-btns input { width: 100%; }
+
+/* Кнопка-тема: маленький квадрат */
+.btn-icon { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+/* Чекбокс в одну строку с подписью (и внутри панелей, и в ntp-row) */
+span.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+
+/* Конвертер: строки величин с копированием */
+.conv-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.conv-row:last-of-type { border-bottom: none; }
+.conv-val { font-family: Consolas, monospace; color: var(--accent); }

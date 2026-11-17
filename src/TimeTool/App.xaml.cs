@@ -12,7 +12,11 @@ public partial class App : Application
         var window = new Window(new MainPage()) { Title = "TimeTool — таймер и расчёт времени" };
 #if WINDOWS
         // закрытие окна → трей (выход — через меню значка в трее)
-        window.Created += (_, _) => Platforms.Windows.TrayService.Attach(window);
+        window.Created += (_, _) =>
+        {
+            Platforms.Windows.TrayService.Attach(window);
+            Platforms.Windows.ToastNotifier.Init();
+        };
 #endif
         return window;
     }

@@ -94,7 +94,9 @@
                     <div class="result-detail">@BaseValue.ToString("dd.MM.yyyy HH:mm") @(ShiftSign == "-" ? "−" : "+") @ShiftValue @UnitName</div>
                 </div>
             }
+        </section>
 
+        <section class="panel">
             <h3>Конвертер единиц</h3>
             <div class="shift-row">
                 <label>Значение<input type="number" min="0" @bind="ConvValue" /></label>
@@ -105,18 +107,21 @@
                         <option value="hours">часы</option>
                         <option value="days">дни</option>
                         <option value="weeks">недели</option>
+                        <option value="months">месяцы (≈30,44 дн)</option>
+                        <option value="years">годы (≈365,24 дн)</option>
                     </select>
                 </label>
             </div>
-            @if (ConvTotal.HasValue)
+            @if (ConvTotal is { } ct)
             {
-                <div class="result">
-                    <div class="result-detail">
-                        @ConvTotal.Value.TotalDays.ToString("0.###") дней ·
-                        @ConvTotal.Value.TotalHours.ToString("0.##") часов ·
-                        @ConvTotal.Value.TotalMinutes.ToString("0.#") минут ·
-                        @ConvTotal.Value.TotalSeconds.ToString("0") секунд
-                    </div>
+                <div>
+                    @ConvRow("Недели", ct.TotalDays / 7)
+                    @ConvRow("Дни", ct.TotalDays)
+                    @ConvRow("Часы", ct.TotalHours)
+                    @ConvRow("Минуты", ct.TotalMinutes)
+                    @ConvRow("Секунды", ct.TotalSeconds)
+                    @ConvRow("Месяцы (≈)", ct.TotalDays / 30.4369)
+                    @ConvRow("Годы (≈)", ct.TotalDays / 365.2425)
                 </div>
             }
         </section>
@@ -214,9 +219,26 @@
                 "hours" => TimeSpan.FromHours(ConvValue),
                 "days" => TimeSpan.FromDays(ConvValue),
                 "weeks" => TimeSpan.FromDays(ConvValue * 7),
+                "months" => TimeSpan.FromDays(ConvValue * 30.4369),
+                "years" => TimeSpan.FromDays(ConvValue * 365.2425),
                 _ => TimeSpan.FromMinutes(ConvValue),
             };
         }
+    }
+
+    private RenderFragment ConvRow(string name, double value) => __builder =>
+    {
+        var text = value.ToString("0.###");
+        <div class="conv-row">
+            <span>@name</span>
+            <span class="conv-val">@text</span>
+            <button type="button" class="btn btn-small" @onclick="() => CopyValue(text)" title="Скопировать">⧉</button>
+        </div>
+    };
+
+    private async Task CopyValue(string text)
+    {
+        try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", text); } catch { }
     }
 
     private string? ShiftError

@@ -17,10 +17,10 @@
     <div class="panel">
         <div class="ntp-row">
             <button type="button" class="btn" @onclick="SyncNtp" disabled="@_ntpBusy">@(_ntpBusy ? "Сверка…" : "Сверить с эталонным временем (NTP)")</button>
-            <label class="check">
+            <span class="check">
                 <input type="checkbox" checked="@_autoNtp" @onchange="ToggleAutoNtp" />
                 автосверка каждые 15 мин
-            </label>
+            </span>
             @if (_ntpMessage is not null)
             {
                 <span class="ntp-msg @(_ntpOk ? "" : "err")">@_ntpMessage</span>
@@ -41,9 +41,10 @@
                     <option value="12">12 часов (AM/PM)</option>
                 </select>
             </label>
-            <label>Показывать секунды
+            <span class="check" style="align-self:end; padding-bottom:8px;">
                 <input type="checkbox" checked="@State.ShowSeconds" @onchange="ToggleSeconds" />
-            </label>
+                Показывать секунды
+            </span>
         </div>
     </div>
 </div>
