@@ -45,6 +45,13 @@
                 <input type="checkbox" checked="@State.ShowSeconds" @onchange="ToggleSeconds" />
                 Показывать секунды
             </span>
+            @if (_autostartSupported)
+            {
+                <span class="check" style="align-self:end; padding-bottom:8px;">
+                    <input type="checkbox" checked="@_autoStart" @onchange="ToggleAutoStart" />
+                    Запускаться с Windows
+                </span>
+            }
         </div>
     </div>
 </div>
@@ -58,6 +65,12 @@
     private bool _ntpBusy;
     private bool _ntpOk;
     private bool _autoNtp;
+    private bool _autoStart;
+#if WINDOWS
+    private const bool _autostartSupported = true;
+#else
+    private const bool _autostartSupported = false;
+#endif
     private DateTime _lastNtpSync = DateTime.MinValue;
     private string? _ntpMessage;
     private bool _disposed;
@@ -85,6 +98,9 @@
                     _format = s.Use24Hours ? "24" : "12";
                 }
             }
+#if WINDOWS
+            _autoStart = Platforms.Windows.Autostart.IsEnabled();
+#endif
         }
         catch { }
         _now = State.NowInZone();
@@ -144,6 +160,15 @@
     private async Task ToggleAutoNtp(ChangeEventArgs e)
     {
         _autoNtp = e.Value is bool b && b;
+        await SaveAsync();
+    }
+
+    private async Task ToggleAutoStart(ChangeEventArgs e)
+    {
+        _autoStart = e.Value is bool b && b;
+#if WINDOWS
+        Platforms.Windows.Autostart.Set(_autoStart);
+#endif
         await SaveAsync();
     }
 

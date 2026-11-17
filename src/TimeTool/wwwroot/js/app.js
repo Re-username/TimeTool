@@ -57,3 +57,11 @@ window.timeToolHotkeys = (function () {
 })();
 
 // Виджет: какую вкладку показывать (задаётся скриптом хоста до создания документа)
+
+// Кастомный звук: воспроизведение base64 (файл прочитан на стороне .NET)
+window.playBase64 = function (mime, base64) {
+    try {
+        var a = new Audio("data:" + mime + ";base64," + base64);
+        a.play().catch(function () { });
+    } catch (e) { }
+};

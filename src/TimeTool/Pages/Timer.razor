@@ -20,6 +20,13 @@
         }
     </div>
 
+    <div class="sound-row">
+        <label style="flex:1;">Звук по окончании (файл wav/mp3/ogg, пусто — стандартный сигнал)
+            <input @bind="_soundPath" @bind:after="SaveAsync" placeholder="C:\\Sounds\\bell.mp3" disabled="@IsRunning" />
+        </label>
+        <button type="button" class="btn" @onclick="TestSound" disabled="@IsRunning">Проверить</button>
+    </div>
+
     <div class="big-display @(Finished ? "finished" : "")">@Display</div>
 
     <div class="progress"><div class="progress-bar" style="width: @ProgressPercent%"></div></div>
@@ -49,6 +56,7 @@
     private int Hours { get; set; }
     private int Minutes { get; set; } = 5;
     private int Seconds { get; set; }
+    private string _soundPath = "";
 
     private TimeSpan Total = TimeSpan.FromMinutes(5);
     private TimeSpan Remaining = TimeSpan.FromMinutes(5);
@@ -81,6 +89,7 @@
                     Hours = s.Hours;
                     Minutes = s.Minutes;
                     Seconds = s.Seconds;
+                    _soundPath = s.SoundPath ?? "";
                     RecalcTotal();
                     Remaining = Total;
                     await InvokeAsync(StateHasChanged);
@@ -158,7 +167,7 @@
     {
         try
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(new SavedTimer { Hours = Hours, Minutes = Minutes, Seconds = Seconds });
+            var json = System.Text.Json.JsonSerializer.Serialize(new SavedTimer { Hours = Hours, Minutes = Minutes, Seconds = Seconds, SoundPath = _soundPath });
             await JS.InvokeVoidAsync("localStorage.setItem", "timetool-timer", json);
         }
         catch { }
@@ -179,7 +188,10 @@
                     Remaining = TimeSpan.Zero;
                     IsRunning = false;
                     Finished = true;
-                    try { await JS.InvokeVoidAsync("beep", 3); } catch { }
+                    await PlayFinishSound();
+#if WINDOWS
+                    Platforms.Windows.TrayService.ShowBalloon("TimeTool — таймер", "Время вышло!");
+#endif
                     _ = SaveAsync();
                 }
                 await InvokeAsync(StateHasChanged);
@@ -211,10 +223,39 @@
         await Task.CompletedTask;
     }
 
+    private async Task TestSound() => await PlayFinishSound();
+
+    /// <summary>Кастомный звук из файла (base64 в WebView) либо стандартный сигнал.</summary>
+    private async Task PlayFinishSound()
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_soundPath) && File.Exists(_soundPath))
+            {
+                var bytes = await File.ReadAllBytesAsync(_soundPath);
+                if (bytes.Length > 0)
+                {
+                    var mime = Path.GetExtension(_soundPath).ToLowerInvariant() switch
+                    {
+                        ".wav" => "audio/wav",
+                        ".ogg" => "audio/ogg",
+                        _ => "audio/mpeg",
+                    };
+                    var b64 = Convert.ToBase64String(bytes);
+                    await JS.InvokeVoidAsync("playBase64", mime, b64);
+                    return;
+                }
+            }
+        }
+        catch { }
+        try { await JS.InvokeVoidAsync("beep", 3); } catch { }
+    }
+
     private sealed class SavedTimer
     {
         public int Hours { get; set; }
         public int Minutes { get; set; }
         public int Seconds { get; set; }
+        public string? SoundPath { get; set; }
     }
 }

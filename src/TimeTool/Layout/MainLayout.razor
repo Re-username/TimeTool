@@ -106,8 +106,9 @@
         _reminderAt = at;
         try { await JS.InvokeVoidAsync("beep", 2); } catch { }
 #if WINDOWS
-        Platforms.Windows.ToastNotifier.Show($"TimeTool: {item.Name}",
-            DateTime.Now > at ? "Событие наступило!" : $"Осталось {FormatLeft(at - DateTime.Now)} (до {at:dd.MM.yyyy HH:mm})");
+        var body = DateTime.Now > at ? "Событие наступило!" : $"Осталось {FormatLeft(at - DateTime.Now)} (до {at:dd.MM.yyyy HH:mm})";
+        Platforms.Windows.ToastNotifier.Show($"TimeTool: {item.Name}", body);
+        Platforms.Windows.TrayService.ShowBalloon(item.Name, body);
 #endif
         await InvokeAsync(StateHasChanged);
     }

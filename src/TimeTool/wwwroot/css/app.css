@@ -295,3 +295,10 @@ span.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13p
 .conv-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
 .conv-row:last-of-type { border-bottom: none; }
 .conv-val { font-family: Consolas, monospace; color: var(--accent); }
+
+/* Конвертер — компактная плашка, не растягивается на всю ширину сетки */
+.panel-narrow { max-width: 430px; }
+
+/* Строка выбора звука таймера */
+.sound-row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.sound-row label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-soft); }

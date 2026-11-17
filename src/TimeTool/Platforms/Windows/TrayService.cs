@@ -19,7 +19,9 @@ public static class TrayService
     private const uint NIF_MESSAGE = 0x01;
     private const uint NIF_ICON = 0x02;
     private const uint NIF_TIP = 0x04;
+    private const uint NIF_INFO = 0x10;
     private const uint NIM_ADD = 0x00;
+    private const uint NIM_MODIFY = 0x01;
     private const uint NIM_DELETE = 0x02;
     private const int ID_ICON = 5000;
     private const int ID_MENU_OPEN = 1001;
@@ -152,6 +154,29 @@ public static class TrayService
             return;
         ShowWindow(_mainHwnd, SW_SHOW);
         SetForegroundWindow(_mainHwnd);
+    }
+
+    /// <summary>Всплывающее уведомление у значка в трее — видно всегда, в отличие от toast API.</summary>
+    public static void ShowBalloon(string title, string text)
+    {
+        try
+        {
+            EnsureTrayIcon();
+            if (_trayHwnd == IntPtr.Zero)
+                return;
+            var data = new NOTIFYICONDATAW
+            {
+                cbSize = Marshal.SizeOf<NOTIFYICONDATAW>(),
+                hWnd = _trayHwnd,
+                uID = ID_ICON,
+                uFlags = NIF_INFO,
+                szInfo = text.Length > 255 ? text[..255] : text,
+                szInfoTitle = title.Length > 63 ? title[..63] : title,
+                dwInfoFlags = 0x01, // NIIF_INFO
+            };
+            Shell_NotifyIconW(NIM_MODIFY, ref data);
+        }
+        catch { }
     }
 
     private static void ExitApp()
