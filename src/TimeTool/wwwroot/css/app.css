@@ -220,3 +220,44 @@ kbd {
 .settings-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-soft); }
 label.check { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); }
 label.check input { min-height: 0; }
+
+/* ---- События ---- */
+.events-list { display: flex; flex-direction: column; gap: 10px; }
+.event-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 16px;
+  flex-wrap: wrap;
+}
+.event-main { flex: 2; min-width: 200px; }
+.event-name { font-size: 1.05rem; font-weight: 600; }
+.event-when { color: var(--text-soft); font-size: 12.5px; margin-top: 2px; }
+.event-left { text-align: right; }
+.event-count { font-family: Consolas, monospace; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+.event-actions { display: flex; gap: 6px; }
+.alert.info { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; color: var(--text-soft); }
+
+/* ---- Баннер напоминания ---- */
+.reminder-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: var(--panel-soft);
+  flex: none;
+  flex-wrap: wrap;
+}
+
+/* ---- Интервалы ---- */
+.interval-row { display: flex; align-items: center; gap: 8px; }
+.interval-row input[type="time"] { width: 110px; }
+.interval-dur { font-family: Consolas, monospace; color: var(--text-soft); min-width: 48px; }
+.hint { font-size: 12.5px; color: var(--text-soft); margin: 0; line-height: 1.4; }
+.btn-small { padding: 4px 10px; font-size: 12px; min-height: 28px; }

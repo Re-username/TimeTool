@@ -2,24 +2,40 @@
 
 @inherits LayoutComponentBase
 @inject IJSRuntime JS
+@inject Services.EventsStore Store
 @implements IAsyncDisposable
 
 <div class="layout">
     <header class="header">
         <h1>TimeTool</h1>
         <nav class="tabs">
-            <NavLink href="/" Match="NavLinkMatch.All">Часы</NavLink>
-            <NavLink href="/timer">Таймер</NavLink>
-            <NavLink href="/until">До даты</NavLink>
-            <NavLink href="/stopwatch">Секундомер</NavLink>
+            <NavLink href="/" Match="NavLinkMatch.All">События</NavLink>
             <NavLink href="/calc">Калькулятор</NavLink>
+            <NavLink href="/timer">Таймер</NavLink>
+            <NavLink href="/stopwatch">Секундомер</NavLink>
+            <NavLink href="/clock">Часы</NavLink>
         </nav>
         <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
         <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
     </header>
 
+    @if (_reminder is not null)
+    {
+        <div class="reminder-banner" role="alert">
+            <span>🔔 <strong>@_reminder.Name</strong> — @(DateTime.Now > _reminderAt ? "сейчас!" : $"осталось {FormatLeft(_reminderAt - DateTime.Now)}") (@_reminderAt.ToString("dd.MM.yyyy HH:mm"))</span>
+            <button type="button" class="btn btn-small" @onclick="() => _reminder = null">Понятно</button>
+        </div>
+    }
+
     <main class="content" tabindex="0">
-        @Body
+        <ErrorBoundary @ref="_boundary">
+            <ChildContent>
+                @Body
+            </ChildContent>
+            <ErrorContent Context="ex">
+                <div class="alert error" style="white-space:pre-wrap;">Ошибка страницы: @ex.GetType().Name: @ex.Message</div>
+            </ErrorContent>
+        </ErrorBoundary>
     </main>
 </div>
 
@@ -41,8 +57,10 @@
                     <p>Задайте часы, минуты и секунды или нажмите быстрый пресет (1/5/15/30 минут, 1 час). «Старт» запускает отсчёт, «Пауза» — приостанавливает, «Сброс» — возвращает к заданному времени. По окончании звучит сигнал (три коротких звука) и время мигает. <kbd>Пробел</kbd> — старт/пауза. Последняя длительность запоминается.</p>
                 </section>
                 <section>
-                    <h3>Отсчёт до даты (календарь)</h3>
-                    <p>Выберите целевую дату в календаре (и необязательное время). Включите <strong>«повторять ежемесячно»</strong> — отсчёт будет идти до ближайшего N-го числа каждого месяца (например, до 25-го: после 25 декабря автоматически переключится на 25 января). Отсчёт обновляется каждую секунду по реальному времени; показаны остаток в днях/часах/минутах и точная цель.</p>
+                    <h3>События и отсчёты (главная)</h3>
+                    <p>Событие: название, дата, необязательное время, <strong>повтор</strong> (не повторять / каждый месяц / каждый год) и <strong>напоминание</strong> (за час / 3 часа / 12 часов / день / 3 дня). Для ежемесячных событий отсчёт идёт до ближайшего N-го числа и после наступления сам переключается на следующий месяц — удобно для «сколько до зарплаты». Список отсортирован по ближайшей дате и обновляется каждую секунду.</p>
+                    <p><strong>Умные напоминания:</strong> когда до события остаётся заданное время, вверху приложения появляется баннер со звуковым сигналом. Если приложение было закрыто, напоминание покажется при запуске (если событие прошло не более суток назад). Каждое напоминание срабатывает один раз на наступление. События запоминаются между запусками.</p>
+                    <p>Кнопка <strong>«Копировать»</strong> копирует отсчёт в буфер в формате Markdown — вставьте в заметку Obsidian: <code>**Зарплата** — осталось 8 д 3 ч (до 25.12.2026 09:00)</code>.</p>
                 </section>
                 <section>
                     <h3>Секундомер</h3>
@@ -51,9 +69,11 @@
                 <section>
                     <h3>Калькулятор времени и дат</h3>
                     <ul>
-                        <li><strong>Разница между моментами</strong>: начало и конец (дата и время) — результат «N дней X часов Y минут» плюс общие суммы (дней/часов/минут/секунд). Конец раньше начала — разница считается по модулю.</li>
-                        <li><strong>Сдвиг даты</strong>: исходная дата-время плюс или минус интервал — минуты, часы, дни, недели, месяцы и годы (месяцы и годы считаются по календарю: 31.01 + 1 месяц = 28/29.02).</li>
+                        <li><strong>Сумма интервалов</strong>: несколько промежутков, например смены «7:00–14:00» и «15:00–18:00» — итог «10:00 (10 часов)». Конец раньше начала считается как переход через полночь.</li>
+                        <li><strong>Разница между моментами</strong>: начало и конец (дата и время) — «N дней X часов Y минут» плюс общие суммы. Конец раньше начала — по модулю.</li>
+                        <li><strong>Сдвиг даты</strong>: дата-время плюс/минус интервал — минуты, часы, дни, недели, месяцы, годы (по календарю).</li>
                     </ul>
+                    <p>У каждого результата — кнопка «Копировать» (Markdown для Obsidian).</p>
                 </section>
                 <section>
                     <h3>Общее</h3>
@@ -65,11 +85,36 @@
 }
 
 @code {
+    private ErrorBoundary? _boundary;
     private bool IsDark = true;
     private bool HelpVisible;
     private bool _focusHelp;
+    private Services.EventItem? _reminder;
+    private DateTime _reminderAt;
     private DotNetObjectReference<MainLayout>? _helpReference;
     private ElementReference HelpCloseButton;
+
+    protected override void OnInitialized()
+    {
+        Store.Remind += OnRemind;
+    }
+
+    private async void OnRemind(Services.EventItem item, DateTime at)
+    {
+        _reminder = item;
+        _reminderAt = at;
+        try { await JS.InvokeVoidAsync("beep", 2); } catch { }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string FormatLeft(TimeSpan left)
+    {
+        if (left.TotalDays >= 1)
+            return $"{(int)left.TotalDays} д {(int)left.Hours} ч";
+        if (left.TotalHours >= 1)
+            return $"{(int)left.TotalHours} ч {left.Minutes} мин";
+        return $"{(int)left.TotalMinutes} мин";
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -82,6 +127,7 @@
                 await JS.InvokeVoidAsync("timeToolHotkeys.init", _helpReference);
             }
             catch (Exception ex) when (ex is JSException or InvalidOperationException or JSDisconnectedException) { }
+            await Store.InitAsync(JS);
             StateHasChanged();
         }
 
@@ -129,6 +175,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        Store.Remind -= OnRemind;
         if (_helpReference != null)
         {
             try { await JS.InvokeVoidAsync("timeToolHotkeys.dispose"); }

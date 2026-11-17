@@ -1,0 +1,158 @@
+@namespace TimeTool.Pages
+
+@page "/"
+@page "/events"
+@inject IJSRuntime JS
+@inject Services.EventsStore Store
+@inject Services.TimeState State
+
+<PageTitle>События</PageTitle>
+
+<div class="page">
+    <h2>События и отсчёты</h2>
+
+    <div class="panel">
+        <div class="shift-row">
+            <label style="flex:2; min-width:160px;">Название
+                <input @bind="_name" placeholder="Например: Зарплата" />
+            </label>
+            <label>Дата
+                <input type="date" @bind="_date" />
+            </label>
+            <label>Время
+                <input type="time" @bind="_time" />
+            </label>
+        </div>
+        <div class="shift-row">
+            <label>Повтор
+                <select @bind="_repeat">
+                    <option value="none">не повторять</option>
+                    <option value="monthly">каждый месяц</option>
+                    <option value="yearly">каждый год</option>
+                </select>
+            </label>
+            <label>Напоминание
+                <select @bind="_remind">
+                    <option value="0">выключено</option>
+                    <option value="60">за 1 час</option>
+                    <option value="180">за 3 часа</option>
+                    <option value="720">за 12 часов</option>
+                    <option value="1440">за 1 день</option>
+                    <option value="4320">за 3 дня</option>
+                </select>
+            </label>
+            <div class="controls" style="align-self:end;">
+                <button type="button" class="btn primary" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_name)">Добавить</button>
+            </div>
+        </div>
+    </div>
+
+    @if (Store.Events.Count == 0)
+    {
+        <div class="alert info">Событий нет. Добавьте, например, «Зарплата» 25-го числа с повтором «каждый месяц» — отсчёт будет вестись до ближайшего 25-го, а после него сам переключится на следующий месяц.</div>
+    }
+    else
+    {
+        <div class="events-list">
+            @foreach (var e in Store.Events.OrderBy(x => Services.EventsStore.NextOccurrence(x, _now)))
+            {
+                var next = Services.EventsStore.NextOccurrence(e, _now);
+                var left = next - _now;
+                <div class="event-card">
+                    <div class="event-main">
+                        <div class="event-name">@e.Name</div>
+                        <div class="event-when">
+                            @(e.Repeat == "monthly" ? $"каждое {e.Date.Day}-е число" : e.Repeat == "yearly" ? $"каждый год, {e.Date.ToString("d MMMM", _ru)}" : "однократно")
+                            · ближайшее: @next.ToString("dd.MM.yyyy HH:mm", _ru)
+                        </div>
+                        @if (e.RemindLeadMinutes > 0)
+                        {
+                            <div class="event-when">напоминание за @LeadText(e.RemindLeadMinutes)</div>
+                        }
+                    </div>
+                    <div class="event-left">
+                        <div class="event-count">@FormatLeft(left)</div>
+                        <div class="event-when">@left.TotalDays.ToString("0.#") дней</div>
+                    </div>
+                    <div class="event-actions">
+                        <button type="button" class="btn btn-small" @onclick="() => CopyEvent(e, next, left)" title="Скопировать отсчёт в буфер (markdown — для Obsidian)">Копировать</button>
+                        <button type="button" class="btn btn-small danger" @onclick="() => Remove(e)" title="Удалить">✕</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly System.Globalization.CultureInfo _ru = new("ru-RU");
+
+    private string _name = "";
+    private DateTime _date = DateTime.Today.AddDays(7);
+    private DateTime _time = DateTime.Today;
+    private string _repeat = "monthly";
+    private string _remind = "1440";
+    private DateTime _now = DateTime.Now;
+    private bool _disposed;
+
+    protected override void OnInitialized()
+    {
+        _ = InitAsync();
+        _ = TickLoop();
+    }
+
+    private async Task InitAsync()
+    {
+        await Store.InitAsync(JS);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task TickLoop()
+    {
+        while (!_disposed)
+        {
+            _now = DateTime.Now;
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(1000);
+        }
+    }
+
+    private async Task Add()
+    {
+        await Store.AddAsync(new Services.EventItem
+        {
+            Name = _name.Trim(),
+            Date = _date.Date + _time.TimeOfDay,
+            Repeat = _repeat,
+            RemindLeadMinutes = int.TryParse(_remind, out var r) ? r : 0,
+        });
+        _name = "";
+    }
+
+    private async Task Remove(Services.EventItem e) => await Store.RemoveAsync(e.Id);
+
+    private async Task CopyEvent(Services.EventItem e, DateTime next, TimeSpan left)
+    {
+        var md = $"**{e.Name}** — осталось {FormatLeft(left)} (до {next.ToString("dd.MM.yyyy HH:mm", _ru)})";
+        try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", md); } catch { }
+    }
+
+    private static string LeadText(int minutes) => minutes switch
+    {
+        60 => "1 час",
+        180 => "3 часов",
+        720 => "12 часов",
+        1440 => "1 день",
+        4320 => "3 дней",
+        _ => $"{minutes} мин",
+    };
+
+    private static string FormatLeft(TimeSpan left)
+    {
+        if (left.TotalDays >= 1)
+            return $"{(int)left.TotalDays} д {(int)left.Hours} ч {left.Minutes} мин";
+        if (left.TotalHours >= 1)
+            return $"{(int)left.TotalHours} ч {left.Minutes} мин";
+        return $"{(int)left.TotalMinutes} мин {left.Seconds} с";
+    }
+}

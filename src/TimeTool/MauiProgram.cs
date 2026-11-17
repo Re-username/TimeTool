@@ -18,9 +18,7 @@ public static class MauiProgram
 
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddSingleton<Services.TimeState>();
-#if DEBUG
-        builder.Services.AddBlazorWebViewDeveloperTools();
-#endif
+        builder.Services.AddSingleton<Services.EventsStore>();
 
 #if ANDROID
         // Звук таймера срабатывает без жеста пользователя (сработка по прошествии времени)
@@ -43,4 +41,5 @@ public static class MauiProgram
         }
         catch { }
     }
+
 }

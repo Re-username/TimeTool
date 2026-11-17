@@ -1,16 +1,44 @@
 @namespace TimeTool.Pages
 @page "/calc"
+@inject IJSRuntime JS
 
-<PageTitle>Расчёт времени</PageTitle>
+<PageTitle>Калькулятор</PageTitle>
 
 <div class="page">
     <h2>Расчёт времени</h2>
 
     <div class="calc-grid">
         <section class="panel">
+            <h3>Сумма интервалов</h3>
+            <p class="hint">Например, смены: 7:00–14:00 и 15:00–18:00 = 10 часов. Конец раньше начала — интервал через полночь.</p>
+            @for (var i = 0; i < _intervals.Count; i++)
+            {
+                var idx = i;
+                <div class="interval-row">
+                    <input type="time" @bind="_intervals[idx].Start" aria-label="Начало" />
+                    <span>—</span>
+                    <input type="time" @bind="_intervals[idx].End" aria-label="Конец" />
+                    <span class="interval-dur">@IntervalText(_intervals[idx])</span>
+                    <button type="button" class="btn btn-small danger" @onclick="() => RemoveInterval(idx)" disabled="@(_intervals.Count == 1)" title="Убрать строку">✕</button>
+                </div>
+            }
+            <div class="controls" style="justify-content:flex-start;">
+                <button type="button" class="btn btn-small" @onclick="AddInterval">＋ Добавить интервал</button>
+                <button type="button" class="btn btn-small" @onclick="CopyIntervals" title="Скопировать сумму в буфер (markdown — для Obsidian)">Копировать</button>
+            </div>
+            <div class="result">
+                <div class="result-main">Итого: @FormatTotal(IntervalsTotal)</div>
+                <div class="result-detail">@($"{IntervalsTotal.TotalHours:0.#}") часов · @($"{(int)IntervalsTotal.TotalMinutes}") минут</div>
+            </div>
+        </section>
+
+        <section class="panel">
             <h3>Разница между моментами</h3>
             <label>Начало<input type="datetime-local" @bind="StartValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
             <label>Конец<input type="datetime-local" @bind="EndValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+            <div class="controls" style="justify-content:flex-start;">
+                <button type="button" class="btn btn-small" @onclick="CopyDiff" title="Скопировать в буфер (markdown — для Obsidian)">Копировать</button>
+            </div>
             @if (Diff.HasValue)
             {
                 <div class="result">
@@ -47,6 +75,9 @@
                     </select>
                 </label>
             </div>
+            <div class="controls" style="justify-content:flex-start;">
+                <button type="button" class="btn btn-small" @onclick="CopyShift" title="Скопировать в буфер (markdown — для Obsidian)">Копировать</button>
+            </div>
             @if (ShiftError is not null)
             {
                 <div class="alert error">@ShiftError</div>
@@ -63,6 +94,66 @@
 </div>
 
 @code {
+    private sealed class Interval
+    {
+        public DateTime Start { get; set; } = DateTime.Today.AddHours(7);
+        public DateTime End { get; set; } = DateTime.Today.AddHours(14);
+    }
+
+    private readonly List<Interval> _intervals = new() { new Interval(), new Interval { Start = DateTime.Today.AddHours(15), End = DateTime.Today.AddHours(18) } };
+
+    private TimeSpan IntervalsTotal
+    {
+        get
+        {
+            var sum = TimeSpan.Zero;
+            foreach (var iv in _intervals)
+            {
+                var start = iv.Start.TimeOfDay;
+                var end = iv.End.TimeOfDay;
+                var d = end >= start ? end - start : end + TimeSpan.FromDays(1) - start;
+                sum += d;
+            }
+            return sum;
+        }
+    }
+
+    private static string FormatTotal(TimeSpan t) =>
+        $"{(int)t.TotalHours}:{t.Minutes:D2}:{t.Seconds:D2}";
+
+    private static string IntervalText(Interval iv)
+    {
+        var start = iv.Start.TimeOfDay;
+        var end = iv.End.TimeOfDay;
+        var d = end >= start ? end - start : end + TimeSpan.FromDays(1) - start;
+        return $"{(int)d.TotalHours}:{d.Minutes:D2}";
+    }
+
+    private void AddInterval() => _intervals.Add(new Interval());
+
+    private void RemoveInterval(int idx) => _intervals.RemoveAt(idx);
+
+    private async Task CopyIntervals()
+    {
+        var md = $"**Сумма интервалов:** {FormatTotal(IntervalsTotal)} ({IntervalsTotal.TotalHours:0.#} ч)";
+        try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", md); } catch { }
+    }
+
+    private async Task CopyDiff()
+    {
+        if (Diff is not { } d)
+            return;
+        var md = $"**Разница:** {FormatDiff(d)} ({d.TotalDays:0.#} дн / {d.TotalHours:0.#} ч)";
+        try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", md); } catch { }
+    }
+
+    private async Task CopyShift()
+    {
+        if (ShiftResult is not { } r)
+            return;
+        var md = $"**{BaseValue:dd.MM.yyyy HH:mm}** {(ShiftSign == "-" ? "−" : "+")} {ShiftValue} {UnitName} = **{r:dd.MM.yyyy HH:mm}**";
+        try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", md); } catch { }
+    }
     public DateTime StartValue { get; set; } = DateTime.Today.AddHours(8);
     public DateTime EndValue { get; set; } = DateTime.Today.AddHours(17);
     public DateTime BaseValue { get; set; } = DateTime.Now;

@@ -44,6 +44,9 @@
             });
         })();
     </script>
+    <!-- autostart="false": старт делает хост BlazorWebView через interop. Если оставить
+         автостарт, гонка с вызовом хоста падает с "Blazor has already started" и
+         приложение не рендерится (проявляется нестабильно). -->
     <script src="_framework/blazor.webview.js"></script>
 </body>
 
