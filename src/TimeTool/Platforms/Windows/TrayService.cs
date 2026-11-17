@@ -62,6 +62,12 @@ public static class TrayService
             // закрытие → трей, а не выход
             EnsureTrayIcon();
             ShowWindow(hWnd, SW_HIDE);
+            if (!_hintShown)
+            {
+                _hintShown = true;
+                ShowBalloon("TimeTool свёрнут в трей",
+                    "Значок в скрытых значках (стрелка ^ рядом с треем). Перетащите его на панель, чтобы закрепить.");
+            }
             return IntPtr.Zero;
         }
         return CallWindowProc(_oldMainProc, hWnd, msg, wParam, lParam);
@@ -102,6 +108,7 @@ public static class TrayService
     }
 
     private static IntPtr _hIcon;
+    private static bool _hintShown;
 
     private static void LogTray(string msg)
     {
