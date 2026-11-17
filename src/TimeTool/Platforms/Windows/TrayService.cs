@@ -8,10 +8,13 @@ namespace TimeTool.Platforms.Windows;
 /// <summary>
 /// Закрытие окна → в трей (не выход). Сворачивание кнопкой «—» — как обычно в панели задач.
 /// Клик по значку — вернуть окно; правая кнопка — меню (Открыть / Выход).
+/// Значок живёт на СВОЕМ потоке с собственным циклом сообщений: скрытие/состояние
+/// UI-потока приложения его не убивает (иначе Explorer убирал значок через секунду).
 /// </summary>
 public static class TrayService
 {
     private const int WM_CLOSE = 0x0010;
+    private const int WM_QUIT = 0x0012;
     private const int WM_COMMAND = 0x0111;
     private const uint WM_TRAYCALLBACK = 0x8001;
     private const int WM_LBUTTONUP = 0x0202;
@@ -33,26 +36,73 @@ public static class TrayService
     private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     private static WndProcDelegate? _mainProc;
-    private static WndProcDelegate? _trayProc;
+    private static WndProcDelegate? _trayProc; // держим ссылку, иначе GC собьёт WndProc
     private static IntPtr _mainHwnd;
     private static IntPtr _oldMainProc;
-    private static IntPtr _trayHwnd;
+    private static volatile IntPtr _trayHwnd;
+    private static Thread? _trayThread;
+    private static readonly ManualResetEventSlim _trayReady = new(false);
+    private static volatile bool _iconAdded;
     private static bool _exitRequested;
-    private static Microsoft.Maui.Controls.Window? _window;
+    private static bool _hintShown;
+    private static IntPtr _hIcon;
 
     public static void Attach(Microsoft.Maui.Controls.Window window)
     {
         try
         {
-            _window = window;
             var native = window.Handler?.PlatformView as Microsoft.UI.Xaml.Window
                 ?? throw new InvalidOperationException("Нативное окно недоступно");
             var hwnd = WindowNative.GetWindowHandle(native);
             _mainHwnd = hwnd;
             _mainProc = MainWndProc;
             _oldMainProc = SetWindowLongPtr(hwnd, GWL_WNDPROC, Marshal.GetFunctionPointerForDelegate(_mainProc));
+            StartTrayThread();
         }
         catch { /* трей — необязателен, не должно ронять приложение */ }
+    }
+
+    private static void StartTrayThread()
+    {
+        if (_trayThread is not null)
+            return;
+        _trayThread = new Thread(TrayThreadProc)
+        {
+            IsBackground = true,
+            Name = "TimeToolTray",
+        };
+        _trayThread.SetApartmentState(ApartmentState.STA);
+        _trayThread.Start();
+        _trayReady.Wait(TimeSpan.FromSeconds(3));
+    }
+
+    private static void TrayThreadProc()
+    {
+        try
+        {
+            _trayProc = TrayWndProc;
+            _trayHwnd = CreateWindowExW(0, "STATIC", "TimeToolTray", 0, 0, 0, 0, 0,
+                new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero); // HWND_MESSAGE
+            if (_trayHwnd == IntPtr.Zero)
+            {
+                LogTray("CreateWindowExW для трея вернул 0, err=" + Marshal.GetLastWin32Error());
+                return;
+            }
+            SetWindowLongPtr(_trayHwnd, GWL_WNDPROC, Marshal.GetFunctionPointerForDelegate(_trayProc));
+            _trayReady.Set();
+
+            while (GetMessageW(out var msg, IntPtr.Zero, 0, 0))
+            {
+                if (msg.message == WM_QUIT)
+                    break;
+                TranslateMessage(ref msg);
+                DispatchMessageW(ref msg);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogTray("TrayThreadProc: " + ex);
+        }
     }
 
     private static IntPtr MainWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -75,13 +125,11 @@ public static class TrayService
 
     private static void EnsureTrayIcon()
     {
-        if (_trayHwnd != IntPtr.Zero)
+        if (_iconAdded)
             return;
-
-        _trayProc = TrayWndProc;
-        _trayHwnd = CreateWindowExW(0, "STATIC", "TimeToolTray", 0, 0, 0, 0, 0,
-            new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero); // HWND_MESSAGE
-        SetWindowLongPtr(_trayHwnd, GWL_WNDPROC, Marshal.GetFunctionPointerForDelegate(_trayProc));
+        StartTrayThread();
+        if (_trayHwnd == IntPtr.Zero)
+            return;
 
         // иконка — из exe приложения (а не системная стрелка): на ней приложение узнаваемо
         try
@@ -103,24 +151,10 @@ public static class TrayService
             hIcon = _hIcon != IntPtr.Zero ? _hIcon : LoadIcon(IntPtr.Zero, new IntPtr(0x7F00)),
             szTip = "TimeTool — таймер и расчёт времени",
         };
-        if (!Shell_NotifyIconW(NIM_ADD, ref data))
-            LogTray("Shell_NotifyIconW(NIM_ADD) вернул false");
-    }
-
-    private static IntPtr _hIcon;
-    private static bool _hintShown;
-
-    private static void LogTray(string msg)
-    {
-        try
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimeTool");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "tray.log"),
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {msg}{Environment.NewLine}");
-        }
-        catch { }
+        if (Shell_NotifyIconW(NIM_ADD, ref data))
+            _iconAdded = true;
+        else
+            LogTray("Shell_NotifyIconW(NIM_ADD) вернул false, err=" + Marshal.GetLastWin32Error());
     }
 
     private static IntPtr TrayWndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
@@ -151,7 +185,7 @@ public static class TrayService
         AppendMenuW(menu, 0, ID_MENU_EXIT, "Выход");
         GetCursorPos(out var pt);
         SetForegroundWindow(_trayHwnd);
-        TrackPopupMenu(menu, 0x0100, pt.X, pt.Y, 0, _trayHwnd, IntPtr.Zero); // TPM_RIGHTBUTTON... 0x0100 = TPM_RETURNCMD? нет — выбор через WM_COMMAND
+        TrackPopupMenu(menu, 0, pt.X, pt.Y, 0, _trayHwnd, IntPtr.Zero);
         DestroyMenu(menu);
     }
 
@@ -169,7 +203,7 @@ public static class TrayService
         try
         {
             EnsureTrayIcon();
-            if (_trayHwnd == IntPtr.Zero)
+            if (_trayHwnd == IntPtr.Zero || !_iconAdded)
                 return;
             var data = new NOTIFYICONDATAW
             {
@@ -189,12 +223,30 @@ public static class TrayService
     private static void ExitApp()
     {
         _exitRequested = true;
-        if (_trayHwnd != IntPtr.Zero)
+        try
         {
-            var data = new NOTIFYICONDATAW { cbSize = Marshal.SizeOf<NOTIFYICONDATAW>(), hWnd = _trayHwnd, uID = ID_ICON };
-            Shell_NotifyIconW(NIM_DELETE, ref data);
+            if (_trayHwnd != IntPtr.Zero && _iconAdded)
+            {
+                var data = new NOTIFYICONDATAW { cbSize = Marshal.SizeOf<NOTIFYICONDATAW>(), hWnd = _trayHwnd, uID = ID_ICON };
+                Shell_NotifyIconW(NIM_DELETE, ref data);
+            }
+            PostMessageW(_trayHwnd, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
         }
+        catch { }
         Microsoft.Maui.Controls.Application.Current?.Quit();
+    }
+
+    private static void LogTray(string m)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TimeTool");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "tray.log"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {m}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
@@ -204,22 +256,29 @@ public static class TrayService
     [DllImport("user32.dll")] private static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] private static extern IntPtr CreateWindowExW(int exStyle, string className, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr CreateWindowExW(int exStyle, string className, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
     [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool AppendMenuW(IntPtr menu, uint flags, int id, string text);
     [DllImport("user32.dll")] private static extern bool TrackPopupMenu(IntPtr menu, uint flags, int x, int y, int reserved, IntPtr hwnd, IntPtr rect);
     [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
+    [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
+    [DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool GetMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG lpMsg);
+    [DllImport("user32.dll")] private static extern IntPtr DispatchMessageW(ref MSG lpMsg);
+
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATAW data);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern uint ExtractIconExW(string lpszFile, int nIconIndex, out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIcons);
 
-    [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
-
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public POINT pt; }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NOTIFYICONDATAW
