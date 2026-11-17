@@ -8,7 +8,8 @@ public sealed class EventItem
     public string Name { get; set; } = "";
     public DateTime Date { get; set; } = DateTime.Today.AddDays(7);
     public string Repeat { get; set; } = "none"; // none | monthly | yearly
-    public int RemindLeadMinutes { get; set; } // 0 — без напоминания
+    public int RemindLeadMinutes { get; set; } // 0 — без напоминания, -1 — вовремя
+    public string? SoundPath { get; set; } // кастомный звук напоминания (wav/mp3/ogg), пусто — стандартный
 }
 
 /// <summary>События с повторяемостью + движок «умных» напоминаний.</summary>

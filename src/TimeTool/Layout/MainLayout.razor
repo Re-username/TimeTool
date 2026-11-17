@@ -104,13 +104,39 @@
     {
         _reminder = item;
         _reminderAt = at;
-        try { await JS.InvokeVoidAsync("beep", 2); } catch { }
+        await PlayEventSoundAsync(item);
 #if WINDOWS
         var body = DateTime.Now > at ? "Событие наступило!" : $"Осталось {FormatLeft(at - DateTime.Now)} (до {at:dd.MM.yyyy HH:mm})";
         Platforms.Windows.ToastNotifier.Show($"TimeTool: {item.Name}", body);
         Platforms.Windows.TrayService.ShowBalloon(item.Name, body);
 #endif
-        await InvokeAsync(StateHasChanged);
+        try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+    }
+
+    /// <summary>Звук напоминания: кастомный файл события (≤8 МБ, base64 в WebView) либо стандартный сигнал.</summary>
+    private async Task PlayEventSoundAsync(Services.EventItem item)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(item.SoundPath) && File.Exists(item.SoundPath))
+            {
+                var info = new FileInfo(item.SoundPath);
+                if (info.Length is > 0 and <= 8 * 1024 * 1024)
+                {
+                    var bytes = await File.ReadAllBytesAsync(item.SoundPath);
+                    var mime = Path.GetExtension(item.SoundPath).ToLowerInvariant() switch
+                    {
+                        ".wav" => "audio/wav",
+                        ".ogg" => "audio/ogg",
+                        _ => "audio/mpeg",
+                    };
+                    await JS.InvokeVoidAsync("playBase64", mime, Convert.ToBase64String(bytes));
+                    return;
+                }
+            }
+        }
+        catch { }
+        try { await JS.InvokeVoidAsync("beep", 2); } catch { }
     }
 
     private static string FormatLeft(TimeSpan left)

@@ -22,8 +22,9 @@
 
     <div class="sound-row">
         <label style="flex:1;">Звук по окончании (файл wav/mp3/ogg, пусто — стандартный сигнал)
-            <input @bind="_soundPath" @bind:after="SaveAsync" placeholder="C:\\Sounds\\bell.mp3" disabled="@IsRunning" />
+            <input @bind="_soundPath" @bind:after="SaveAsync" placeholder="не выбран — стандартный сигнал" disabled="@IsRunning" />
         </label>
+        <button type="button" class="btn" @onclick="PickSound" disabled="@IsRunning">Обзор…</button>
         <button type="button" class="btn" @onclick="TestSound" disabled="@IsRunning">Проверить</button>
     </div>
 
@@ -225,6 +226,19 @@
 
     private async Task TestSound() => await PlayFinishSound();
 
+    private async Task PickSound()
+    {
+#if WINDOWS
+        var path = await Platforms.Windows.AudioPick.PickAudioAsync();
+        if (!string.IsNullOrEmpty(path))
+        {
+            _soundPath = path;
+            await SaveAsync();
+            await TestSound();
+        }
+#endif
+    }
+
     /// <summary>Кастомный звук из файла (base64 в WebView) либо стандартный сигнал.</summary>
     private async Task PlayFinishSound()
     {
@@ -232,9 +246,10 @@
         {
             if (!string.IsNullOrWhiteSpace(_soundPath) && File.Exists(_soundPath))
             {
-                var bytes = await File.ReadAllBytesAsync(_soundPath);
-                if (bytes.Length > 0)
+                var info = new FileInfo(_soundPath);
+                if (info.Length is > 0 and <= 8 * 1024 * 1024) // WebView-интероп не любит гигантские сообщения
                 {
+                    var bytes = await File.ReadAllBytesAsync(_soundPath);
                     var mime = Path.GetExtension(_soundPath).ToLowerInvariant() switch
                     {
                         ".wav" => "audio/wav",

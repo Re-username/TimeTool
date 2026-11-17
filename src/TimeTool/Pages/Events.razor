@@ -44,6 +44,10 @@
                     <option value="4320">за 3 дней</option>
                 </select>
             </label>
+            <label style="flex:2; min-width:200px;">Звук события (wav/mp3/ogg, пусто — стандартный)
+                <input @bind="_soundPath" placeholder="не выбран" />
+            </label>
+            <button type="button" class="btn" style="align-self:end;" @onclick="PickSound">Обзор…</button>
             <div class="controls" style="align-self:end;">
                 <button type="button" class="btn primary" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_name)">Добавить</button>
             </div>
@@ -102,6 +106,7 @@
     private DateTime _time = DateTime.Today;
     private string _repeat = "monthly";
     private string _remind = "1440";
+    private string _soundPath = "";
     private DateTime _now = DateTime.Now;
     private bool _disposed;
 
@@ -121,8 +126,12 @@
     {
         while (!_disposed)
         {
-            _now = DateTime.Now;
-            await InvokeAsync(StateHasChanged);
+            try
+            {
+                _now = DateTime.Now;
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (InvalidOperationException) { break; } // компонент уничтожен при навигации
             await Task.Delay(1000);
         }
     }
@@ -135,8 +144,18 @@
             Date = _date.Date + _time.TimeOfDay,
             Repeat = _repeat,
             RemindLeadMinutes = int.TryParse(_remind, out var r) ? r : 0,
+            SoundPath = string.IsNullOrWhiteSpace(_soundPath) ? null : _soundPath.Trim(),
         });
         _name = "";
+    }
+
+    private async Task PickSound()
+    {
+#if WINDOWS
+        var path = await Platforms.Windows.AudioPick.PickAudioAsync();
+        if (!string.IsNullOrEmpty(path))
+            _soundPath = path;
+#endif
     }
 
     private async Task Remove(Services.EventItem e) => await Store.RemoveAsync(e.Id);

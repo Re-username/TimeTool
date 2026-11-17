@@ -128,10 +128,14 @@
     {
         while (!_disposed)
         {
-            _now = State.NowInZone();
-            if (_autoNtp && DateTime.Now - _lastNtpSync > TimeSpan.FromMinutes(15) && !_ntpBusy)
-                await SyncNtp();
-            await InvokeAsync(StateHasChanged);
+            try
+            {
+                _now = State.NowInZone();
+                if (_autoNtp && DateTime.Now - _lastNtpSync > TimeSpan.FromMinutes(15) && !_ntpBusy)
+                    await SyncNtp();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (InvalidOperationException) { break; } // компонент уничтожен при навигации
             await Task.Delay(500);
         }
     }
