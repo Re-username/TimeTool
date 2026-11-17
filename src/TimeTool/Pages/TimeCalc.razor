@@ -34,12 +34,17 @@
 
         <section class="panel">
             <h3>Разница между моментами</h3>
-            <label>Начало<input type="datetime-local" @bind="StartValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
-            <label>Конец<input type="datetime-local" @bind="EndValue" @bind:format="yyyy-MM-ddTHH:mm" /></label>
+            <p class="hint">Можно печатать с клавиатуры — результат обновляется по мере ввода.</p>
+            <label>Начало<input type="datetime-local" @bind="StartVal" @bind:event="oninput" /></label>
+            <label>Конец<input type="datetime-local" @bind="EndVal" @bind:event="oninput" /></label>
             <div class="controls" style="justify-content:flex-start;">
-                <button type="button" class="btn btn-small" @onclick="CopyDiff" title="Скопировать в буфер (markdown — для Obsidian)">Копировать</button>
+                <button type="button" class="btn btn-small" @onclick="CopyDiff" disabled="@(Diff is null)" title="Скопировать в буфер (markdown — для Obsidian)">Копировать</button>
             </div>
-            @if (Diff.HasValue)
+            @if (StartValue is null || EndValue is null)
+            {
+                <div class="alert info">Введите обе даты — результат появится автоматически.</div>
+            }
+            else if (Diff.HasValue)
             {
                 <div class="result">
                     <div class="result-main">@FormatDiff(Diff.Value)</div>
@@ -87,6 +92,31 @@
                 <div class="result">
                     <div class="result-main">@ShiftResult.Value.ToString("dd.MM.yyyy HH:mm ddd")</div>
                     <div class="result-detail">@BaseValue.ToString("dd.MM.yyyy HH:mm") @(ShiftSign == "-" ? "−" : "+") @ShiftValue @UnitName</div>
+                </div>
+            }
+
+            <h3>Конвертер единиц</h3>
+            <div class="shift-row">
+                <label>Значение<input type="number" min="0" @bind="ConvValue" /></label>
+                <label>Единицы
+                    <select @bind="ConvUnit">
+                        <option value="seconds">секунды</option>
+                        <option value="minutes">минуты</option>
+                        <option value="hours">часы</option>
+                        <option value="days">дни</option>
+                        <option value="weeks">недели</option>
+                    </select>
+                </label>
+            </div>
+            @if (ConvTotal.HasValue)
+            {
+                <div class="result">
+                    <div class="result-detail">
+                        @ConvTotal.Value.TotalDays.ToString("0.###") дней ·
+                        @ConvTotal.Value.TotalHours.ToString("0.##") часов ·
+                        @ConvTotal.Value.TotalMinutes.ToString("0.#") минут ·
+                        @ConvTotal.Value.TotalSeconds.ToString("0") секунд
+                    </div>
                 </div>
             }
         </section>
@@ -154,15 +184,40 @@
         var md = $"**{BaseValue:dd.MM.yyyy HH:mm}** {(ShiftSign == "-" ? "−" : "+")} {ShiftValue} {UnitName} = **{r:dd.MM.yyyy HH:mm}**";
         try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", md); } catch { }
     }
-    public DateTime StartValue { get; set; } = DateTime.Today.AddHours(8);
-    public DateTime EndValue { get; set; } = DateTime.Today.AddHours(17);
+    public DateTime? StartVal { get; set; } = DateTime.Today.AddHours(8);
+    public DateTime? EndVal { get; set; } = DateTime.Today.AddHours(17);
     public DateTime BaseValue { get; set; } = DateTime.Now;
 
     public int ShiftValue { get; set; } = 14;
     public string ShiftUnit { get; set; } = "days";
     public string ShiftSign { get; set; } = "+";
 
-    private TimeSpan? Diff => EndValue >= StartValue ? EndValue - StartValue : StartValue - EndValue;
+    public int ConvValue { get; set; } = 40;
+    public string ConvUnit { get; set; } = "hours";
+
+    private DateTime? StartValue => StartVal;
+    private DateTime? EndValue => EndVal;
+
+    private TimeSpan? Diff => StartValue is { } s && EndValue is { } e
+        ? (e >= s ? e - s : s - e)
+        : null;
+
+    private TimeSpan? ConvTotal
+    {
+        get
+        {
+            if (ConvValue < 0)
+                return null;
+            return ConvUnit switch
+            {
+                "seconds" => TimeSpan.FromSeconds(ConvValue),
+                "hours" => TimeSpan.FromHours(ConvValue),
+                "days" => TimeSpan.FromDays(ConvValue),
+                "weeks" => TimeSpan.FromDays(ConvValue * 7),
+                _ => TimeSpan.FromMinutes(ConvValue),
+            };
+        }
+    }
 
     private string? ShiftError
     {

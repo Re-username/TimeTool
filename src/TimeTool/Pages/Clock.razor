@@ -17,6 +17,10 @@
     <div class="panel">
         <div class="ntp-row">
             <button type="button" class="btn" @onclick="SyncNtp" disabled="@_ntpBusy">@(_ntpBusy ? "Сверка…" : "Сверить с эталонным временем (NTP)")</button>
+            <label class="check">
+                <input type="checkbox" checked="@_autoNtp" @onchange="ToggleAutoNtp" />
+                автосверка каждые 15 мин
+            </label>
             @if (_ntpMessage is not null)
             {
                 <span class="ntp-msg @(_ntpOk ? "" : "err")">@_ntpMessage</span>
@@ -52,6 +56,8 @@
     private string _format = "24";
     private bool _ntpBusy;
     private bool _ntpOk;
+    private bool _autoNtp;
+    private DateTime _lastNtpSync = DateTime.MinValue;
     private string? _ntpMessage;
     private bool _disposed;
 
@@ -74,6 +80,7 @@
                     if (!string.IsNullOrEmpty(s.TimeZoneId)) State.TimeZoneId = s.TimeZoneId;
                     State.Use24Hours = s.Use24Hours;
                     State.ShowSeconds = s.ShowSeconds;
+                    _autoNtp = s.AutoNtp;
                     _format = s.Use24Hours ? "24" : "12";
                 }
             }
@@ -93,6 +100,7 @@
                 TimeZoneId = State.TimeZoneId,
                 Use24Hours = State.Use24Hours,
                 ShowSeconds = State.ShowSeconds,
+                AutoNtp = _autoNtp,
             });
             await JS.InvokeVoidAsync("localStorage.setItem", "timetool-clock", json);
         }
@@ -104,6 +112,8 @@
         while (!_disposed)
         {
             _now = State.NowInZone();
+            if (_autoNtp && DateTime.Now - _lastNtpSync > TimeSpan.FromMinutes(15) && !_ntpBusy)
+                await SyncNtp();
             await InvokeAsync(StateHasChanged);
             await Task.Delay(500);
         }
@@ -116,6 +126,7 @@
         _ntpBusy = true;
         try
         {
+            _lastNtpSync = DateTime.Now;
             var r = await Services.TimeState.QueryNtpAsync();
             _ntpOk = r.Ok;
             _ntpMessage = r.Ok
@@ -127,6 +138,12 @@
             _ntpBusy = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    private async Task ToggleAutoNtp(ChangeEventArgs e)
+    {
+        _autoNtp = e.Value is bool b && b;
+        await SaveAsync();
     }
 
     private async Task ApplyFormat()
@@ -148,5 +165,6 @@
         public string? TimeZoneId { get; set; }
         public bool Use24Hours { get; set; } = true;
         public bool ShowSeconds { get; set; } = true;
+        public bool AutoNtp { get; set; }
     }
 }

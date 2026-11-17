@@ -3,6 +3,7 @@
 @inherits LayoutComponentBase
 @inject IJSRuntime JS
 @inject Services.EventsStore Store
+@inject NavigationManager Nav
 @implements IAsyncDisposable
 
 <div class="layout">
@@ -16,6 +17,10 @@
             <NavLink href="/clock">Часы</NavLink>
         </nav>
         <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
+        @if (_widgetSupported)
+        {
+            <button type="button" class="btn" @onclick="OpenWidget" title="Открыть виджет текущей вкладки (всегда сверху, для рабочего стола)">⧉ Виджет</button>
+        }
         <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
     </header>
 
@@ -86,6 +91,11 @@
 
 @code {
     private ErrorBoundary? _boundary;
+#if WINDOWS
+    private const bool _widgetSupported = true;
+#else
+    private const bool _widgetSupported = false;
+#endif
     private bool IsDark = true;
     private bool HelpVisible;
     private bool _focusHelp;
@@ -149,6 +159,16 @@
         HelpVisible = true;
         _focusHelp = true;
         try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+    }
+
+    private void OpenWidget()
+    {
+#if WINDOWS
+        var tab = Nav.Uri.TrimEnd('/').TrimStart('/');
+        if (tab == "")
+            tab = "events";
+        Platforms.Windows.WidgetWindows.Open(tab);
+#endif
     }
 
     private void CloseHelp() => HelpVisible = false;

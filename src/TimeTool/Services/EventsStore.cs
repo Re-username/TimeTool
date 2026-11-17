@@ -90,6 +90,18 @@ public sealed class EventsStore
     /// <summary>Ближайшее наступление события относительно момента from.</summary>
     public static DateTime NextOccurrence(EventItem e, DateTime from)
     {
+        if (e.Repeat == "daily")
+        {
+            var c = from.Date + e.Date.TimeOfDay;
+            return c <= from ? c.AddDays(1) : c;
+        }
+        if (e.Repeat == "weekly")
+        {
+            var c = from.Date + e.Date.TimeOfDay;
+            while (c <= from || c.DayOfWeek != e.Date.DayOfWeek)
+                c = c.AddDays(1);
+            return c;
+        }
         if (e.Repeat == "monthly")
         {
             var day = Math.Clamp(e.Date.Day, 1, 28);
@@ -125,16 +137,27 @@ public sealed class EventsStore
                 var now = DateTime.Now;
                 foreach (var e in _events.ToList())
                 {
-                    if (e.RemindLeadMinutes <= 0)
+                    if (e.RemindLeadMinutes == 0)
                         continue;
                     var next = NextOccurrence(e, now);
                     var key = $"{e.Id}:{next.Ticks}";
                     if (_fired.Contains(key))
                         continue;
 
-                    var lead = TimeSpan.FromMinutes(e.RemindLeadMinutes);
-                    // напомнить заранее; если приложение было закрыто — показать и только что прошедшее
-                    if (next - now <= lead && now - next <= TimeSpan.FromHours(24))
+                    bool due;
+                    if (e.RemindLeadMinutes < 0)
+                    {
+                        // «вовремя»: в момент события и окно сутки после (если приложение было закрыто)
+                        due = now >= next && now - next <= TimeSpan.FromHours(24);
+                    }
+                    else
+                    {
+                        // заранее (lead); если приложение было закрыто — показать и только что прошедшее
+                        var lead = TimeSpan.FromMinutes(e.RemindLeadMinutes);
+                        due = next - now <= lead && now - next <= TimeSpan.FromHours(24);
+                    }
+
+                    if (due)
                     {
                         _fired.Add(key);
                         if (_fired.Count > 500)

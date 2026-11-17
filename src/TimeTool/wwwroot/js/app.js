@@ -55,3 +55,6 @@ window.timeToolHotkeys = (function () {
         }
     };
 })();
+
+// Виджет: какую вкладку показывать (задаётся скриптом хоста до создания документа)
+window.getWidgetTab = function () { return window.__widget || null; };

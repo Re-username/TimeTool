@@ -17,7 +17,7 @@
         else if (IsRunning)
         {
             <button type="button" class="btn" @onclick="Pause">Пауза</button>
-            <button type="button" class="btn" @onclick="Lap">Круг</button>
+            <button type="button" class="btn" @onclick="Lap">Отметить</button>
             <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
         }
         else
@@ -30,7 +30,7 @@
     @if (Laps.Count > 0)
     {
         <div class="laps">
-            <h3>Круги</h3>
+            <h3>Отметки</h3>
             <table>
                 <thead>
                     <tr><th>№</th><th>Время круга</th><th>Суммарно</th></tr>

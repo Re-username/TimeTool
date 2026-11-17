@@ -9,6 +9,11 @@ public partial class App : Application
 
     protected override Window CreateWindow(IActivationState? activationState)
     {
-        return new Window(new MainPage()) { Title = "TimeTool — таймер и расчёт времени" };
+        var window = new Window(new MainPage()) { Title = "TimeTool — таймер и расчёт времени" };
+#if WINDOWS
+        // закрытие окна → трей (выход — через меню значка в трее)
+        window.Created += (_, _) => Platforms.Windows.TrayService.Attach(window);
+#endif
+        return window;
     }
 }

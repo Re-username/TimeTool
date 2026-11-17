@@ -261,3 +261,26 @@ label.check input { min-height: 0; }
 .interval-dur { font-family: Consolas, monospace; color: var(--text-soft); min-width: 48px; }
 .hint { font-size: 12.5px; color: var(--text-soft); margin: 0; line-height: 1.4; }
 .btn-small { padding: 4px 10px; font-size: 12px; min-height: 28px; }
+
+/* Чекбокс — компактный (общий input{min-height:36px} раздувал его) */
+input[type="checkbox"] { min-height: 0; width: 18px; height: 18px; padding: 0; flex: none; }
+
+/* Панели калькулятора не растягиваются по высоте соседней */
+.calc-grid { align-items: start; }
+
+/* Виджет — компактный режим */
+html.widget { font-size: 12px; }
+html.widget .layout { max-width: none; padding: 8px 10px; gap: 8px; }
+html.widget .header h1 { font-size: .9rem; }
+html.widget .big-display { padding: 10px 8px; border-radius: 8px; }
+html.widget .panel { padding: 8px 10px; }
+
+/* ---- Виджет ---- */
+.widget-body { display: flex; flex-direction: column; gap: 8px; align-items: center; padding: 4px 2px; }
+.w-clock { font-family: Consolas, monospace; font-size: 2.2rem; font-weight: 700; letter-spacing: 1px; }
+.w-sub { color: var(--text-soft); font-size: 12px; text-align: center; }
+.w-row { display: flex; justify-content: space-between; gap: 10px; width: 100%; font-size: 13px; }
+.w-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-val { font-family: Consolas, monospace; color: var(--accent); white-space: nowrap; }
+.w-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.w-btns input { width: 100%; }
