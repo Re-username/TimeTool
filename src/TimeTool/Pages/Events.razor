@@ -44,13 +44,11 @@
                     <option value="4320">за 3 дней</option>
                 </select>
             </label>
-            <label style="flex:2; min-width:200px;">Звук события (wav/mp3/ogg, пусто — стандартный)
+            <label class="grow2">Звук события (wav/mp3/ogg, пусто — стандартный)
                 <input @bind="_soundPath" placeholder="не выбран" />
             </label>
-            <button type="button" class="btn" style="align-self:end;" @onclick="PickSound">Обзор…</button>
-            <div class="controls" style="align-self:end;">
-                <button type="button" class="btn primary" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_name)">Добавить</button>
-            </div>
+            <button type="button" class="btn form-btn" @onclick="PickSound">Обзор…</button>
+            <button type="button" class="btn primary form-btn" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_name)">Добавить</button>
         </div>
     </div>
 

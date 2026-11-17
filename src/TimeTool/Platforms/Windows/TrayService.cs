@@ -46,6 +46,7 @@ public static class TrayService
     private static bool _exitRequested;
     private static bool _hintShown;
     private static IntPtr _hIcon;
+    private static IntPtr _hModule;
 
     public static void Attach(Microsoft.Maui.Controls.Window window)
     {
@@ -76,18 +77,58 @@ public static class TrayService
         _trayReady.Wait(TimeSpan.FromSeconds(3));
     }
 
+    private const string TrayClassName = "TimeToolTrayWnd";
+
     private static void TrayThreadProc()
     {
         try
         {
             _trayProc = TrayWndProc;
-            _trayHwnd = CreateWindowExW(0, "STATIC", "TimeToolTray", 0, 0, 0, 0, 0,
-                new IntPtr(-3), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero); // HWND_MESSAGE
-            if (_trayHwnd == IntPtr.Zero)
+            // свой класс окна: системные классы (STATIC) на новом потоке недоступны —
+            // CreateWindowExW падал с ERROR_CANNOT_FIND_WND_CLASS (1407).
+            // ВАЖНО: класс регистрируется под hInstance модуля — CreateWindowExW должен
+            // получить ТОТ ЖЕ hInstance, иначе класс «не находится».
+            _hModule = GetModuleHandleW(IntPtr.Zero);
+            var wc = new WNDCLASSW
             {
-                LogTray("CreateWindowExW для трея вернул 0, err=" + Marshal.GetLastWin32Error());
+                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_trayProc),
+                hInstance = _hModule,
+                lpszClassName = TrayClassName,
+            };
+            var atom = RegisterClassW(ref wc);
+            if (atom == 0)
+            {
+                LogTray("RegisterClassW вернул 0, err=" + Marshal.GetLastWin32Error());
                 return;
             }
+
+            // цепочка fallback'ов: диагностируем, что именно «не находит» Win32
+            _trayHwnd = CreateWindowExW(0, TrayClassName, "TimeToolTray", 0, 0, 0, 0, 0,
+                new IntPtr(-3), IntPtr.Zero, _hModule, IntPtr.Zero); // HWND_MESSAGE
+            var errName = Marshal.GetLastWin32Error();
+            var errAtom = 0;
+            var errStatic = 0;
+            if (_trayHwnd == IntPtr.Zero && atom != 0)
+            {
+                // поиск по атому класса в обход таблицы имён (MAKEINTATOM)
+                _trayHwnd = CreateWindowExWAtom(0, new IntPtr(atom), "TimeToolTray", 0, 0, 0, 0, 0,
+                    new IntPtr(-3), IntPtr.Zero, _hModule, IntPtr.Zero);
+                errAtom = Marshal.GetLastWin32Error();
+            }
+            if (_trayHwnd == IntPtr.Zero)
+            {
+                // глобальный системный класс user32 (CS_GLOBALCLASS) — доступен на любом потоке
+                _trayHwnd = CreateWindowExW(0, "STATIC", "TimeToolTray", 0, 0, 0, 0, 0,
+                    new IntPtr(-3), IntPtr.Zero, _hModule, IntPtr.Zero);
+                errStatic = Marshal.GetLastWin32Error();
+            }
+            if (_trayHwnd == IntPtr.Zero)
+            {
+                LogTray($"CreateWindowExW: hModule={_hModule} atom={atom} errs name={errName} atom={errAtom} static={errStatic}");
+                return;
+            }
+            if (errName != 0)
+                LogTray($"CreateWindowExW: hwnd={_trayHwnd}, сработал fallback (errs name={errName} atom={errAtom} static={errStatic})");
             SetWindowLongPtr(_trayHwnd, GWL_WNDPROC, Marshal.GetFunctionPointerForDelegate(_trayProc));
             _trayReady.Set();
 
@@ -257,6 +298,7 @@ public static class TrayService
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr CreateWindowExW(int exStyle, string className, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true)] private static extern IntPtr CreateWindowExWAtom(int exStyle, IntPtr atomClassName, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
     [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll")] private static extern bool AppendMenuW(IntPtr menu, uint flags, int id, string text);
@@ -265,6 +307,7 @@ public static class TrayService
     [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
     [DllImport("user32.dll")] private static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern bool GetMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+    [DllImport("user32.dll")] private static extern bool PeekMessageW(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG lpMsg);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessageW(ref MSG lpMsg);
 
@@ -273,6 +316,27 @@ public static class TrayService
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern uint ExtractIconExW(string lpszFile, int nIconIndex, out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIcons);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern ushort RegisterClassW(ref WNDCLASSW lpWndClass);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandleW(IntPtr lpModuleName);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WNDCLASSW
+    {
+        public uint style;
+        public IntPtr lpfnWndProc;
+        public int cbClsExtra;
+        public int cbWndExtra;
+        public IntPtr hInstance;
+        public IntPtr hIcon;
+        public IntPtr hCursor;
+        public IntPtr hbrBackground;
+        public string lpszMenuName;
+        public string lpszClassName;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X; public int Y; }
