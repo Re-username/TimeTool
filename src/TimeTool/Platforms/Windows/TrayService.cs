@@ -16,9 +16,13 @@ public static class TrayService
     private const int WM_CLOSE = 0x0010;
     private const int WM_QUIT = 0x0012;
     private const int WM_COMMAND = 0x0111;
+    private const int WM_CONTEXTMENU = 0x007B;
     private const uint WM_TRAYCALLBACK = 0x8001;
-    private const int WM_LBUTTONUP = 0x0202;
-    private const int WM_RBUTTONUP = 0x0205;
+    private const uint WM_LBUTTONUP = 0x0202;
+    private const uint WM_LBUTTONDBLCLK = 0x0203;
+    private const uint WM_RBUTTONUP = 0x0205;
+    private const uint NIN_SELECT = 0x0400;
+    private const uint NIN_KEYSELECT = 0x0401;
     private const uint NIF_MESSAGE = 0x01;
     private const uint NIF_ICON = 0x02;
     private const uint NIF_TIP = 0x04;
@@ -217,10 +221,12 @@ public static class TrayService
     {
         if (msg == WM_TRAYCALLBACK)
         {
+            // Набор сообщений — для обоих режимов значка (version 0 и version 4 после NIM_SETVERSION):
+            // в v4 оболочка шлёт NIN_SELECT вместо WM_LBUTTONUP и WM_CONTEXTMENU вместо WM_RBUTTONUP
             var mouse = (uint)lParam;
-            if (mouse == WM_LBUTTONUP)
+            if (mouse == WM_LBUTTONUP || mouse == WM_LBUTTONDBLCLK || mouse == NIN_SELECT || mouse == NIN_KEYSELECT)
                 RestoreWindow();
-            else if (mouse == WM_RBUTTONUP)
+            else if (mouse == WM_RBUTTONUP || mouse == WM_CONTEXTMENU)
                 ShowTrayMenu();
         }
         else if (msg == WM_COMMAND)

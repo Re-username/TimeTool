@@ -310,3 +310,7 @@ span.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13p
 /* Форма событий: ровная сетка — label растёт, кнопки одной высоты и по базовой линии */
 .grow2 { flex: 2 1 220px; min-width: 200px; }
 .form-btn { align-self: end; min-height: 36px; }
+/* input[type=date]/time и select имеют собственную внутреннюю высоту в WebView —
+   фиксируем высоту, чтобы все поля формы были ровно одного размера */
+.shift-row input, .shift-row select { height: 36px; box-sizing: border-box; }
+.form-btn { height: 36px; }

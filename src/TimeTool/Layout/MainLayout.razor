@@ -4,6 +4,7 @@
 @inject IJSRuntime JS
 @inject Services.EventsStore Store
 @inject NavigationManager Nav
+@inject Services.TimerEngine Timer
 @implements IAsyncDisposable
 
 <div class="layout">
@@ -25,6 +26,13 @@
         <div class="reminder-banner" role="alert">
             <span>🔔 <strong>@_reminder.Name</strong> — @(DateTime.Now > _reminderAt ? "сейчас!" : $"осталось {FormatLeft(_reminderAt - DateTime.Now)}") (@_reminderAt.ToString("dd.MM.yyyy HH:mm"))</span>
             <button type="button" class="btn btn-small" @onclick="() => _reminder = null">Понятно</button>
+        </div>
+    }
+    @if (_timerElapsed)
+    {
+        <div class="reminder-banner" role="alert">
+            <span>🔔 <strong>Таймер</strong> — время вышло!</span>
+            <button type="button" class="btn btn-small" @onclick="() => _timerElapsed = false">Понятно</button>
         </div>
     }
 
@@ -93,12 +101,52 @@
     private bool _focusHelp;
     private Services.EventItem? _reminder;
     private DateTime _reminderAt;
+    private bool _timerElapsed;
     private DotNetObjectReference<MainLayout>? _helpReference;
     private ElementReference HelpCloseButton;
 
     protected override void OnInitialized()
     {
         Store.Remind += OnRemind;
+        Timer.Elapsed += OnTimerElapsed;
+    }
+
+    /// <summary>Таймер дошёл до нуля: звук + уведомления + баннер. Layout живёт всегда — срабатывает на любой вкладке.</summary>
+    private async void OnTimerElapsed()
+    {
+        await PlayTimerSoundAsync();
+#if WINDOWS
+        Platforms.Windows.TrayService.ShowBalloon("TimeTool — таймер", "Время вышло!");
+        Platforms.Windows.ToastNotifier.Show("TimeTool: таймер", "Время вышло!");
+#endif
+        _timerElapsed = true;
+        try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+    }
+
+    private async Task PlayTimerSoundAsync()
+    {
+        try
+        {
+            var path = Timer.SoundPath;
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                var info = new FileInfo(path);
+                if (info.Length is > 0 and <= 8 * 1024 * 1024)
+                {
+                    var bytes = await File.ReadAllBytesAsync(path);
+                    var mime = Path.GetExtension(path).ToLowerInvariant() switch
+                    {
+                        ".wav" => "audio/wav",
+                        ".ogg" => "audio/ogg",
+                        _ => "audio/mpeg",
+                    };
+                    await JS.InvokeVoidAsync("playBase64", mime, Convert.ToBase64String(bytes));
+                    return;
+                }
+            }
+        }
+        catch { }
+        try { await JS.InvokeVoidAsync("beep", 3); } catch { }
     }
 
     private async void OnRemind(Services.EventItem item, DateTime at)
@@ -209,6 +257,7 @@
     public async ValueTask DisposeAsync()
     {
         Store.Remind -= OnRemind;
+        Timer.Elapsed -= OnTimerElapsed;
         if (_helpReference != null)
         {
             try { await JS.InvokeVoidAsync("timeToolHotkeys.dispose"); }

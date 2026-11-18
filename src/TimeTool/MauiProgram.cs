@@ -19,6 +19,7 @@ public static class MauiProgram
         builder.Services.AddMauiBlazorWebView();
         builder.Services.AddSingleton<Services.TimeState>();
         builder.Services.AddSingleton<Services.EventsStore>();
+        builder.Services.AddSingleton<Services.TimerEngine>();
 
 #if ANDROID
         // Звук таймера срабатывает без жеста пользователя (сработка по прошествии времени)

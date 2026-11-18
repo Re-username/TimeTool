@@ -1,6 +1,9 @@
 @namespace TimeTool.Pages
+
 @page "/timer"
 @inject IJSRuntime JS
+@inject Services.TimerEngine Engine
+@implements IDisposable
 
 <PageTitle>Таймер</PageTitle>
 
@@ -8,43 +11,43 @@
     <h2>Таймер обратного отсчёта</h2>
 
     <div class="duration-row">
-        <label>Часы<input type="number" min="0" max="999" @bind="Hours" disabled="@IsRunning" /></label>
-        <label>Минуты<input type="number" min="0" max="59" @bind="Minutes" disabled="@IsRunning" /></label>
-        <label>Секунды<input type="number" min="0" max="59" @bind="Seconds" disabled="@IsRunning" /></label>
+        <label>Часы<input type="number" min="0" max="999" @bind="Hours" disabled="@Engine.IsRunning" /></label>
+        <label>Минуты<input type="number" min="0" max="59" @bind="Minutes" disabled="@Engine.IsRunning" /></label>
+        <label>Секунды<input type="number" min="0" max="59" @bind="Seconds" disabled="@Engine.IsRunning" /></label>
     </div>
 
     <div class="presets">
         @foreach (var p in Presets)
         {
-            <button type="button" class="btn" @onclick="() => SetPreset(p)" disabled="@IsRunning">@PresetText(p)</button>
+            <button type="button" class="btn" @onclick="() => SetPreset(p)" disabled="@Engine.IsRunning">@PresetText(p)</button>
         }
     </div>
 
     <div class="sound-row">
         <label style="flex:1;">Звук по окончании (файл wav/mp3/ogg, пусто — стандартный сигнал)
-            <input @bind="_soundPath" @bind:after="SaveAsync" placeholder="не выбран — стандартный сигнал" disabled="@IsRunning" />
+            <input @bind="_soundPath" @bind:after="SaveAsync" placeholder="не выбран — стандартный сигнал" disabled="@Engine.IsRunning" />
         </label>
-        <button type="button" class="btn" @onclick="PickSound" disabled="@IsRunning">Обзор…</button>
-        <button type="button" class="btn" @onclick="TestSound" disabled="@IsRunning">Проверить</button>
+        <button type="button" class="btn" @onclick="PickSound" disabled="@Engine.IsRunning">Обзор…</button>
+        <button type="button" class="btn" @onclick="TestSound" disabled="@Engine.IsRunning">Проверить</button>
     </div>
 
-    <div class="big-display @(Finished ? "finished" : "")">@Display</div>
+    <div class="big-display @(Engine.Finished ? "finished" : "")">@Display</div>
 
     <div class="progress"><div class="progress-bar" style="width: @ProgressPercent%"></div></div>
 
     <div class="controls">
-        @if (!IsRunning && !IsPaused)
+        @if (!Engine.IsRunning && !Engine.IsPaused)
         {
-            <button type="button" class="btn primary" @onclick="Start" disabled="@(Total == TimeSpan.Zero)">Старт</button>
+            <button type="button" class="btn primary" @onclick="Start" disabled="@(Engine.Total == TimeSpan.Zero)">Старт</button>
         }
-        else if (IsRunning)
+        else if (Engine.IsRunning)
         {
-            <button type="button" class="btn" @onclick="Pause">Пауза</button>
+            <button type="button" class="btn" @onclick="Engine.Pause">Пауза</button>
             <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
         }
         else
         {
-            <button type="button" class="btn primary" @onclick="Resume">Продолжить</button>
+            <button type="button" class="btn primary" @onclick="Engine.Resume">Продолжить</button>
             <button type="button" class="btn danger" @onclick="Reset">Сброс</button>
         }
     </div>
@@ -59,22 +62,19 @@
     private int Seconds { get; set; }
     private string _soundPath = "";
 
-    private TimeSpan Total = TimeSpan.FromMinutes(5);
-    private TimeSpan Remaining = TimeSpan.FromMinutes(5);
-    private DateTime _endAt;
-    private bool _loopActive;
-    private bool _disposed;
-
-    private bool IsRunning { get; set; }
-    private bool IsPaused { get; set; }
-    private bool Finished { get; set; }
-
-    private string Display => Remaining < TimeSpan.Zero ? TimeSpan.Zero.ToString(@"hh\:mm\:ss") : Remaining.ToString(@"hh\:mm\:ss");
-    private int ProgressPercent => Total == TimeSpan.Zero ? 0 : Math.Min(100, (int)(100 * (1 - Remaining.TotalSeconds / Total.TotalSeconds)));
+    private string Display => Engine.Remaining < TimeSpan.Zero ? TimeSpan.Zero.ToString(@"hh\:mm\:ss") : Engine.Remaining.ToString(@"hh\:mm\:ss");
+    private int ProgressPercent => Engine.Total == TimeSpan.Zero ? 0 : Math.Min(100, (int)(100 * (1 - Engine.Remaining.TotalSeconds / Engine.Total.TotalSeconds)));
 
     protected override void OnInitialized()
     {
+        Engine.Changed += OnEngineChanged;
         _ = RestoreAsync();
+    }
+
+    private void OnEngineChanged()
+    {
+        try { _ = InvokeAsync(StateHasChanged); }
+        catch (InvalidOperationException) { }
     }
 
     private async Task RestoreAsync()
@@ -91,8 +91,8 @@
                     Minutes = s.Minutes;
                     Seconds = s.Seconds;
                     _soundPath = s.SoundPath ?? "";
-                    RecalcTotal();
-                    Remaining = Total;
+                    Engine.SoundPath = _soundPath;
+                    Engine.Arm(CalcTotal());
                     await InvokeAsync(StateHasChanged);
                 }
             }
@@ -100,11 +100,10 @@
         catch { }
     }
 
-    private void RecalcTotal()
+    private TimeSpan CalcTotal()
     {
-        Total = new TimeSpan(Math.Max(0, Hours), Math.Clamp(Minutes, 0, 59), Math.Clamp(Seconds, 0, 59));
-        if (Total > new TimeSpan(999, 59, 59))
-            Total = new TimeSpan(999, 59, 59);
+        var t = new TimeSpan(Math.Max(0, Hours), Math.Clamp(Minutes, 0, 59), Math.Clamp(Seconds, 0, 59));
+        return t > new TimeSpan(999, 59, 59) ? new TimeSpan(999, 59, 59) : t;
     }
 
     private static string PresetText((int h, int m, int s) p)
@@ -124,48 +123,25 @@
         Hours = p.h;
         Minutes = p.m;
         Seconds = p.s;
-        RecalcTotal();
-        Remaining = Total;
-        Finished = false;
+        Engine.Arm(CalcTotal());
     }
 
     private void Start()
     {
-        RecalcTotal();
-        if (Total == TimeSpan.Zero)
-            return;
-        Remaining = Total;
-        BeginCountdown();
-    }
-
-    private void Resume() => BeginCountdown();
-
-    private void BeginCountdown()
-    {
-        Finished = false;
-        IsPaused = false;
-        IsRunning = true;
-        _endAt = DateTime.Now + Remaining;
-        _ = TickLoop();
-    }
-
-    private void Pause()
-    {
-        IsRunning = false;
-        IsPaused = true;
+        Engine.Arm(CalcTotal());
+        Engine.Start();
+        _ = SaveAsync();
     }
 
     private void Reset()
     {
-        IsRunning = false;
-        IsPaused = false;
-        Finished = false;
-        Remaining = Total;
+        Engine.Reset();
         _ = SaveAsync();
     }
 
     private async Task SaveAsync()
     {
+        Engine.SoundPath = _soundPath;
         try
         {
             var json = System.Text.Json.JsonSerializer.Serialize(new SavedTimer { Hours = Hours, Minutes = Minutes, Seconds = Seconds, SoundPath = _soundPath });
@@ -174,57 +150,22 @@
         catch { }
     }
 
-    private async Task TickLoop()
-    {
-        if (_loopActive)
-            return;
-        _loopActive = true;
-        try
-        {
-            while (IsRunning && !_disposed)
-            {
-                Remaining = _endAt - DateTime.Now;
-                if (Remaining <= TimeSpan.Zero)
-                {
-                    Remaining = TimeSpan.Zero;
-                    IsRunning = false;
-                    Finished = true;
-                    await PlayFinishSound();
-#if WINDOWS
-                    Platforms.Windows.TrayService.ShowBalloon("TimeTool — таймер", "Время вышло!");
-#endif
-                    _ = SaveAsync();
-                }
-                await InvokeAsync(StateHasChanged);
-                await Task.Delay(100);
-            }
-        }
-        catch (InvalidOperationException) { }
-        finally
-        {
-            _loopActive = false;
-        }
-    }
-
     private async Task OnKeyDown(KeyboardEventArgs e)
     {
         if (e.Key != " " && e.Code != "Space")
             return;
-        if (Finished)
-        {
+        if (Engine.Finished)
             Reset();
-            return;
-        }
-        if (IsRunning)
-            Pause();
-        else if (IsPaused)
-            Resume();
+        else if (Engine.IsRunning)
+            Engine.Pause();
+        else if (Engine.IsPaused)
+            Engine.Resume();
         else
             Start();
         await Task.CompletedTask;
     }
 
-    private async Task TestSound() => await PlayFinishSound();
+    private async Task TestSound() => await PlayFinishSoundAsync();
 
     private async Task PickSound()
     {
@@ -233,6 +174,7 @@
         if (!string.IsNullOrEmpty(path))
         {
             _soundPath = path;
+            Engine.SoundPath = path;
             await SaveAsync();
             await TestSound();
         }
@@ -240,7 +182,7 @@
     }
 
     /// <summary>Кастомный звук из файла (base64 в WebView) либо стандартный сигнал.</summary>
-    private async Task PlayFinishSound()
+    private async Task PlayFinishSoundAsync()
     {
         try
         {
@@ -264,6 +206,11 @@
         }
         catch { }
         try { await JS.InvokeVoidAsync("beep", 3); } catch { }
+    }
+
+    public void Dispose()
+    {
+        Engine.Changed -= OnEngineChanged;
     }
 
     private sealed class SavedTimer
