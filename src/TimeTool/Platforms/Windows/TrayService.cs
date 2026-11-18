@@ -53,6 +53,7 @@ public static class TrayService
     private static bool _hintShown;
     private static IntPtr _hIcon;
     private static IntPtr _hModule;
+    private static Microsoft.Maui.Controls.Window? _window;
 
     public static void Attach(Microsoft.Maui.Controls.Window window)
     {
@@ -61,6 +62,7 @@ public static class TrayService
             var native = window.Handler?.PlatformView as Microsoft.UI.Xaml.Window
                 ?? throw new InvalidOperationException("Нативное окно недоступно");
             var hwnd = WindowNative.GetWindowHandle(native);
+            _window = window;
             _mainHwnd = hwnd;
             _mainProc = MainWndProc;
             _oldMainProc = SetWindowLongPtr(hwnd, GWL_WNDPROC, Marshal.GetFunctionPointerForDelegate(_mainProc));
@@ -109,23 +111,26 @@ public static class TrayService
             }
 
             // цепочка fallback'ов: диагностируем, что именно «не находит» Win32
-            _trayHwnd = CreateWindowExW(0, TrayClassName, "TimeToolTray", 0, 0, 0, 0, 0,
-                new IntPtr(-3), IntPtr.Zero, _hModule, IntPtr.Zero); // HWND_MESSAGE
+            // окно-трафарет — ОБЫЧНОЕ скрытое top-level (не message-only!): message-only окно
+            // нельзя сделать foreground, и TrackPopupMenu молча не показывает меню (опыт filechat)
+            const int WS_EX_TOOLWINDOW = 0x80;
+            _trayHwnd = CreateWindowExW(WS_EX_TOOLWINDOW, TrayClassName, "TimeToolTray", 0, 0, 0, 0, 0,
+                IntPtr.Zero, IntPtr.Zero, _hModule, IntPtr.Zero);
             var errName = Marshal.GetLastWin32Error();
             var errAtom = 0;
             var errStatic = 0;
             if (_trayHwnd == IntPtr.Zero && atom != 0)
             {
                 // поиск по атому класса в обход таблицы имён (MAKEINTATOM)
-                _trayHwnd = CreateWindowExWAtom(0, new IntPtr(atom), "TimeToolTray", 0, 0, 0, 0, 0,
-                    new IntPtr(-3), IntPtr.Zero, _hModule, IntPtr.Zero);
+                _trayHwnd = CreateWindowExWAtom(WS_EX_TOOLWINDOW, new IntPtr(atom), "TimeToolTray", 0, 0, 0, 0, 0,
+                    IntPtr.Zero, IntPtr.Zero, _hModule, IntPtr.Zero);
                 errAtom = Marshal.GetLastWin32Error();
             }
             if (_trayHwnd == IntPtr.Zero)
             {
                 // глобальный системный класс user32 (CS_GLOBALCLASS) — доступен на любом потоке
-                _trayHwnd = CreateWindowExW(0, "STATIC", "TimeToolTray", 0, 0, 0, 0, 0,
-                    new IntPtr(-3), IntPtr.Zero, _hModule, IntPtr.Zero);
+                _trayHwnd = CreateWindowExW(WS_EX_TOOLWINDOW, "STATIC", "TimeToolTray", 0, 0, 0, 0, 0,
+                    IntPtr.Zero, IntPtr.Zero, _hModule, IntPtr.Zero);
                 errStatic = Marshal.GetLastWin32Error();
             }
             if (_trayHwnd == IntPtr.Zero)
@@ -221,10 +226,10 @@ public static class TrayService
     {
         if (msg == WM_TRAYCALLBACK)
         {
-            // Набор сообщений — для обоих режимов значка (version 0 и version 4 после NIM_SETVERSION):
-            // в v4 оболочка шлёт NIN_SELECT вместо WM_LBUTTONUP и WM_CONTEXTMENU вместо WM_RBUTTONUP
-            var mouse = (uint)lParam;
-            if (mouse == WM_LBUTTONUP || mouse == WM_LBUTTONDBLCLK || mouse == NIN_SELECT || mouse == NIN_KEYSELECT)
+            // ВАЖНО: младшее слово lParam — это сообщение мыши (в старшем бите бывает мусор,
+            // поэтому маскировать ОБЯЗАТЕЛЬНО — иначе клики не распознаются, см. filechat).
+            var mouse = (uint)lParam.ToInt64() & 0xffff;
+            if (mouse == WM_LBUTTONDBLCLK)
                 RestoreWindow();
             else if (mouse == WM_RBUTTONUP || mouse == WM_CONTEXTMENU)
                 ShowTrayMenu();
@@ -255,8 +260,25 @@ public static class TrayService
     {
         if (_mainHwnd == IntPtr.Zero)
             return;
-        ShowWindow(_mainHwnd, SW_SHOW);
-        SetForegroundWindow(_mainHwnd);
+        // манипуляции с окном — на UI-потоке (как в filechat: DispatcherQueue.TryEnqueue)
+        var w = _window;
+        if (w is not null)
+        {
+            w.Dispatcher.Dispatch(() =>
+            {
+                try
+                {
+                    ShowWindow(_mainHwnd, SW_SHOW);
+                    SetForegroundWindow(_mainHwnd);
+                }
+                catch { }
+            });
+        }
+        else
+        {
+            ShowWindow(_mainHwnd, SW_SHOW);
+            SetForegroundWindow(_mainHwnd);
+        }
     }
 
     /// <summary>Всплывающее уведомление у значка в трее — видно всегда, в отличие от toast API.</summary>
@@ -297,7 +319,12 @@ public static class TrayService
             PostMessageW(_trayHwnd, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
         }
         catch { }
-        Microsoft.Maui.Controls.Application.Current?.Quit();
+        // Quit — через диспетчер UI-потока (вызов с потока трея нестабилен)
+        var w = _window;
+        if (w is not null)
+            w.Dispatcher.Dispatch(() => Microsoft.Maui.Controls.Application.Current?.Quit());
+        else
+            Microsoft.Maui.Controls.Application.Current?.Quit();
     }
 
     public static void LogTray(string m)
@@ -313,18 +340,18 @@ public static class TrayService
         catch { }
     }
 
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", ExactSpelling = true)]
     private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     [DllImport("user32.dll")] private static extern IntPtr CallWindowProc(IntPtr lpPrevWndFunc, IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr CreateWindowExW(int exStyle, string className, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
-    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true)] private static extern IntPtr CreateWindowExWAtom(int exStyle, IntPtr atomClassName, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)] private static extern IntPtr CreateWindowExW(int exStyle, string className, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)] private static extern IntPtr CreateWindowExWAtom(int exStyle, IntPtr atomClassName, string? windowName, int style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
     [DllImport("user32.dll")] private static extern IntPtr CreatePopupMenu();
-    [DllImport("user32.dll")] private static extern bool AppendMenuW(IntPtr menu, uint flags, int id, string text);
+    [DllImport("user32.dll", EntryPoint = "AppendMenuW", CharSet = CharSet.Unicode, ExactSpelling = true)] private static extern bool AppendMenuW(IntPtr menu, uint flags, int id, string text);
     [DllImport("user32.dll")] private static extern bool TrackPopupMenu(IntPtr menu, uint flags, int x, int y, int reserved, IntPtr hwnd, IntPtr rect);
     [DllImport("user32.dll")] private static extern bool DestroyMenu(IntPtr menu);
     [DllImport("user32.dll")] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
@@ -334,13 +361,13 @@ public static class TrayService
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref MSG lpMsg);
     [DllImport("user32.dll")] private static extern IntPtr DispatchMessageW(ref MSG lpMsg);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    [DllImport("shell32.dll", EntryPoint = "Shell_NotifyIconW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATAW data);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    [DllImport("shell32.dll", EntryPoint = "ExtractIconExW", CharSet = CharSet.Unicode, ExactSpelling = true)]
     private static extern uint ExtractIconExW(string lpszFile, int nIconIndex, out IntPtr phiconLarge, out IntPtr phiconSmall, uint nIcons);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DllImport("user32.dll", EntryPoint = "RegisterClassW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
     private static extern ushort RegisterClassW(ref WNDCLASSW lpWndClass);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]

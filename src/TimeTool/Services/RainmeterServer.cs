@@ -10,6 +10,8 @@ namespace TimeTool.Services;
 ///   /            — HTML-страница с отсчётами (для плагина WebView2)
 ///   /events.json — список событий с ближайшими датами
 ///   /events.txt  — плоский текст (для WebParser): имя|дд.мм.гггг чч:мм|осталось
+///   /timer.json  — состояние таймера
+///   /timer.txt   — «Таймер|00:05:00» одной строкой для WebParser
 /// </summary>
 public sealed class RainmeterServer
 {
@@ -17,6 +19,7 @@ public sealed class RainmeterServer
     public const int MaxPortTries = 10;
 
     private readonly EventsStore _store;
+    private readonly TimerEngine _timer;
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
 
@@ -24,7 +27,11 @@ public sealed class RainmeterServer
     public bool Running { get; private set; }
     public string Url => $"http://127.0.0.1:{Port}/";
 
-    public RainmeterServer(EventsStore store) => _store = store;
+    public RainmeterServer(EventsStore store, TimerEngine timer)
+    {
+        _store = store;
+        _timer = timer;
+    }
 
     public void Start()
     {
@@ -86,12 +93,18 @@ public sealed class RainmeterServer
                 "/" or "/index.html" => (HtmlPage(), "text/html; charset=utf-8"),
                 "/events.json" => (JsonPayload(), "application/json; charset=utf-8"),
                 "/events.txt" => (TextPayload(), "text/plain; charset=utf-8"),
+                "/timer.json" => (TimerJson(), "application/json; charset=utf-8"),
+                "/timer.txt" => (TimerText(), "text/plain; charset=utf-8"),
                 _ => ("not found", "text/plain; charset=utf-8"),
             };
             var bytes = Encoding.UTF8.GetBytes(content);
+            // BOM помогает Rainmeter (WebParser) определить UTF-8 — иначе кириллицу
+            // он декодирует по системной ANSI-кодировке и данные «теряются»
+            if (path is "/events.txt" or "/timer.txt")
+                bytes = Encoding.UTF8.GetPreamble().Concat(bytes).ToArray();
             ctx.Response.ContentType = mime;
             ctx.Response.ContentLength64 = bytes.Length;
-            if (path != "/" && path != "/index.html" && path != "/events.json" && path != "/events.txt")
+            if (path is not "/" and not "/index.html" and not "/events.json" and not "/events.txt" and not "/timer.json" and not "/timer.txt")
                 ctx.Response.StatusCode = 404;
             await ctx.Response.OutputStream.WriteAsync(bytes);
         }
@@ -121,6 +134,28 @@ public sealed class RainmeterServer
     }
 
     private string JsonPayload() => JsonSerializer.Serialize(Snapshot());
+
+    private string TimerText()
+    {
+        // одна строка «Таймер|значение»: виджет показывает правую часть
+        string value;
+        if (_timer.Finished)
+            value = "Время вышло!";
+        else if (_timer.IsRunning || _timer.IsPaused)
+            value = (_timer.Remaining < TimeSpan.Zero ? TimeSpan.Zero : _timer.Remaining).ToString(@"hh\:mm\:ss");
+        else
+            value = "—";
+        return "Таймер|" + value + "\n";
+    }
+
+    private string TimerJson() => JsonSerializer.Serialize(new
+    {
+        _timer.IsRunning,
+        _timer.IsPaused,
+        _timer.Finished,
+        Remaining = (_timer.Remaining < TimeSpan.Zero ? TimeSpan.Zero : _timer.Remaining).ToString(@"hh\:mm\:ss"),
+        Total = _timer.Total.ToString(@"hh\:mm\:ss"),
+    });
 
     private string TextPayload()
     {

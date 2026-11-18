@@ -35,9 +35,19 @@ public static class MauiProgram
         try
         {
             RainmeterServerHolder.Instance = new Services.RainmeterServer(
-                app.Services.GetRequiredService<Services.EventsStore>());
+                app.Services.GetRequiredService<Services.EventsStore>(),
+                app.Services.GetRequiredService<Services.TimerEngine>());
             RainmeterServerHolder.Instance.Start();
             AppDomain.CurrentDomain.ProcessExit += (_, _) => RainmeterServerHolder.Instance?.Stop();
+
+            // тестовый сидер событий для проверки интеграций (Rainmeter и пр.)
+            if (Environment.GetEnvironmentVariable("TIMETOOL_TEST_EVENTS") == "1")
+            {
+                var store = app.Services.GetRequiredService<Services.EventsStore>();
+                _ = store.AddAsync(new Services.EventItem { Name = "Зарплата", Date = DateTime.Now.AddDays(6).Date.AddHours(9), Repeat = "monthly", WeekendShift = "friday" });
+                _ = store.AddAsync(new Services.EventItem { Name = "День рождения", Date = DateTime.Now.AddDays(9).Date });
+                _ = store.AddAsync(new Services.EventItem { Name = "Тренировка", Date = DateTime.Now.AddDays(1).Date.AddHours(19), Repeat = "weekly" });
+            }
         }
         catch { }
 
