@@ -33,6 +33,13 @@
                     <option value="yearly">каждый год</option>
                 </select>
             </label>
+            <label>Если попало на выходные
+                <select @bind="_weekend">
+                    <option value="none">не переносить</option>
+                    <option value="friday">перенести на пятницу</option>
+                    <option value="monday">перенести на понедельник</option>
+                </select>
+            </label>
             <label>Напоминание
                 <select @bind="_remind">
                     <option value="0">выключено</option>
@@ -76,6 +83,14 @@
                                 _ => "однократно",
                             })
                             · ближайшее: @next.ToString("dd.MM.yyyy HH:mm", _ru)
+                            @if (e.WeekendShift == "friday")
+                            {
+                                <span> · выходные → пятница</span>
+                            }
+                            else if (e.WeekendShift == "monday")
+                            {
+                                <span> · выходные → понедельник</span>
+                            }
                         </div>
                         @if (e.RemindLeadMinutes != 0)
                         {
@@ -103,6 +118,7 @@
     private DateTime _date = DateTime.Today.AddDays(7);
     private DateTime _time = DateTime.Today;
     private string _repeat = "monthly";
+    private string _weekend = "none";
     private string _remind = "1440";
     private string _soundPath = "";
     private DateTime _now = DateTime.Now;
@@ -141,6 +157,7 @@
             Name = _name.Trim(),
             Date = _date.Date + _time.TimeOfDay,
             Repeat = _repeat,
+            WeekendShift = _weekend,
             RemindLeadMinutes = int.TryParse(_remind, out var r) ? r : 0,
             SoundPath = string.IsNullOrWhiteSpace(_soundPath) ? null : _soundPath.Trim(),
         });

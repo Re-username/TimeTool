@@ -10,6 +10,7 @@ public sealed class EventItem
     public string Repeat { get; set; } = "none"; // none | monthly | yearly
     public int RemindLeadMinutes { get; set; } // 0 — без напоминания, -1 — вовремя
     public string? SoundPath { get; set; } // кастомный звук напоминания (wav/mp3/ogg), пусто — стандартный
+    public string WeekendShift { get; set; } = "none"; // none | friday | monday — перенос выпадения на выходные
 }
 
 /// <summary>События с повторяемостью + движок «умных» напоминаний.</summary>
@@ -89,7 +90,7 @@ public sealed class EventsStore
     }
 
     /// <summary>Ближайшее наступление события относительно момента from.</summary>
-    public static DateTime NextOccurrence(EventItem e, DateTime from)
+    private static DateTime NextOccurrenceCore(EventItem e, DateTime from)
     {
         if (e.Repeat == "daily")
         {
@@ -121,6 +122,27 @@ public sealed class EventsStore
         }
         return e.Date;
     }
+
+    /// <summary>Ближайшее наступление с учётом переноса выходных (зп в сб/вс → пятница и т.п.).</summary>
+    public static DateTime NextOccurrence(EventItem e, DateTime from)
+    {
+        var d = NextOccurrenceCore(e, from);
+        if (e.WeekendShift == "none")
+            return d;
+        var shifted = ApplyWeekendShift(d, e.WeekendShift);
+        // перенос назад (на пятницу) имеет смысл только если пятница ещё впереди;
+        // иначе оставляем исходную дату (интерпретация: переносили уже нечего)
+        return shifted > from ? shifted : d;
+    }
+
+    private static DateTime ApplyWeekendShift(DateTime d, string mode) => mode switch
+    {
+        "friday" => d.DayOfWeek == DayOfWeek.Saturday ? d.AddDays(-1)
+                  : d.DayOfWeek == DayOfWeek.Sunday ? d.AddDays(-2) : d,
+        "monday" => d.DayOfWeek == DayOfWeek.Saturday ? d.AddDays(2)
+                  : d.DayOfWeek == DayOfWeek.Sunday ? d.AddDays(1) : d,
+        _ => d,
+    };
 
     private static DateTime ClampDay(DateTime month, int preferredDay)
     {

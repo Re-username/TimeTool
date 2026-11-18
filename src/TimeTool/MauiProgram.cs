@@ -28,7 +28,19 @@ public static class MauiProgram
         });
 #endif
 
-        return builder.Build();
+        var app = builder.Build();
+
+        // Локальный сервер для Rainmeter (127.0.0.1, работает и в трее)
+        try
+        {
+            RainmeterServerHolder.Instance = new Services.RainmeterServer(
+                app.Services.GetRequiredService<Services.EventsStore>());
+            RainmeterServerHolder.Instance.Start();
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => RainmeterServerHolder.Instance?.Stop();
+        }
+        catch { }
+
+        return app;
     }
 
     private static void LogCrash(string source, Exception? ex)
@@ -41,5 +53,10 @@ public static class MauiProgram
         }
         catch { }
     }
+}
 
+/// <summary>Доступ к серверу Rainmeter из платформенного кода (трей и т.п.).</summary>
+public static class RainmeterServerHolder
+{
+    public static Services.RainmeterServer? Instance { get; set; }
 }
