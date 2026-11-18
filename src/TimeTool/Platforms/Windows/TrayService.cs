@@ -26,6 +26,8 @@ public static class TrayService
     private const uint NIM_ADD = 0x00;
     private const uint NIM_MODIFY = 0x01;
     private const uint NIM_DELETE = 0x02;
+    private const uint NIM_SETVERSION = 0x04;
+    private const uint NOTIFYICON_VERSION_4 = 4;
     private const int ID_ICON = 5000;
     private const int ID_MENU_OPEN = 1001;
     private const int ID_MENU_EXIT = 1002;
@@ -193,7 +195,20 @@ public static class TrayService
             szTip = "TimeTool — таймер и расчёт времени",
         };
         if (Shell_NotifyIconW(NIM_ADD, ref data))
+        {
             _iconAdded = true;
+            // без SETVERSION оболочка трактует значок как «version 0» и NIF_INFO-баллуны
+            // на Win10/11 молча теряются (это и была причина «уведомление не пришло»)
+            var ver = new NOTIFYICONDATAW { cbSize = Marshal.SizeOf<NOTIFYICONDATAW>(), hWnd = _trayHwnd, uID = ID_ICON, uTimeoutOrVersion = NOTIFYICON_VERSION_4 };
+            Shell_NotifyIconW(NIM_SETVERSION, ref ver);
+
+            if (Environment.GetEnvironmentVariable("TIMETOOL_TEST_BALLOON") == "1")
+                Task.Delay(2000).ContinueWith(_ =>
+                {
+                    ShowBalloon("Тест TimeTool", "Проверка уведомления из трея");
+                    ToastNotifier.Show("TimeTool: тест", "Проверка toast-уведомления");
+                });
+        }
         else
             LogTray("Shell_NotifyIconW(NIM_ADD) вернул false, err=" + Marshal.GetLastWin32Error());
     }
@@ -255,8 +270,10 @@ public static class TrayService
                 szInfo = text.Length > 255 ? text[..255] : text,
                 szInfoTitle = title.Length > 63 ? title[..63] : title,
                 dwInfoFlags = 0x01, // NIIF_INFO
+                uTimeoutOrVersion = 15_000, // таймаут показа баллуна, мс
             };
-            Shell_NotifyIconW(NIM_MODIFY, ref data);
+            if (!Shell_NotifyIconW(NIM_MODIFY, ref data))
+                LogTray("ShowBalloon: NIM_MODIFY вернул false, err=" + Marshal.GetLastWin32Error());
         }
         catch { }
     }
@@ -277,7 +294,7 @@ public static class TrayService
         Microsoft.Maui.Controls.Application.Current?.Quit();
     }
 
-    private static void LogTray(string m)
+    public static void LogTray(string m)
     {
         try
         {

@@ -17,8 +17,12 @@ public static class ToastNotifier
                 return;
             AppNotificationManager.Default.Register();
             _registered = true;
+            TrayService.LogTray("toast: Register ok, setting=" + AppNotificationManager.Default.Setting);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            TrayService.LogTray("toast Register: " + ex.GetType().Name + ": " + ex.Message);
+        }
     }
 
     public static void Show(string title, string body)
@@ -31,8 +35,12 @@ public static class ToastNotifier
                 .AddText(body)
                 .BuildNotification();
             AppNotificationManager.Default.Show(toast);
+            TrayService.LogTray("toast: Show отправлен, setting=" + AppNotificationManager.Default.Setting);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            TrayService.LogTray("toast Show: " + ex.GetType().Name + ": " + ex.Message);
+        }
     }
 }
 #endif
