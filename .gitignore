@@ -15,3 +15,7 @@ release/*.apk
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Локальные проверки и временные файлы
+*.log
+check-*.png
