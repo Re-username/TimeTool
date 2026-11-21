@@ -7,7 +7,7 @@
 | Путь | Формат | Для чего |
 |---|---|---|
 | `/` | HTML | встраивание целиком (плагин WebView2), автообновление 1 раз/сек |
-| `/events.json` | JSON | массив `{Name, Next, DaysLeft, Left, Repeat, WeekendShift}` |
+| `/events.json` | JSON | массив `{Name, Next, DaysLeft, Left, Repeat, WeekendShift, Note, Happening, Overdue}` |
 | `/events.txt` | текст `имя\|дд.мм.гггг чч:мм\|осталось` | встроенный плагин WebParser |
 
 ## Вариант 1: WebParser (без сторонних плагинов)
