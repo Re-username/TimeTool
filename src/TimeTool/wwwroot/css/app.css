@@ -239,6 +239,17 @@ label.check input { min-height: 0; }
 .event-left { text-align: right; }
 .event-count { font-family: Consolas, monospace; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
 .event-actions { display: flex; gap: 6px; }
+.event-note { color: var(--text-soft); font-size: 12.5px; margin-top: 4px; font-style: italic; white-space: pre-wrap; }
+/* наступило / просрочено */
+.event-card.due { border-color: var(--err); box-shadow: 0 0 0 1px var(--err), 0 0 14px rgba(229, 83, 75, .35); }
+.event-card.overdue { border-color: var(--err); }
+.event-card.overdue .event-count { color: var(--err); }
+.due-badge {
+  display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+  background: var(--err); color: #fff; font-size: 11px; font-weight: 700;
+  vertical-align: middle; animation: due-pulse 1.2s ease-in-out infinite;
+}
+@keyframes due-pulse { 50% { opacity: .55; } }
 .alert.info { background: var(--panel-soft); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; color: var(--text-soft); }
 
 /* ---- Баннер напоминания ---- */

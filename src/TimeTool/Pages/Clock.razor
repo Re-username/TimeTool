@@ -2,6 +2,8 @@
 @page "/clock"
 @inject IJSRuntime JS
 @inject Services.TimeState State
+@inject Services.EventsStore Store
+@implements IDisposable
 
 <PageTitle>Часы</PageTitle>
 
@@ -54,6 +56,40 @@
             }
         </div>
     </div>
+
+    <h3 style="margin:4px 0 8px;">События</h3>
+    @if (_events.Count == 0)
+    {
+        <div class="alert info">Событий нет — добавьте на вкладке «События и отсчёты».</div>
+    }
+    else
+    {
+        <div class="events-list">
+            @foreach (var (e, next, happening, overdue) in _events)
+            {
+                var css = "event-card" + (happening ? " due" : overdue ? " overdue" : "");
+                <div class="@css">
+                    <div class="event-main">
+                        <div class="event-name">
+                            @e.Name
+                            @if (happening)
+                            {
+                                <span class="due-badge">наступило!</span>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(e.Note))
+                        {
+                            <div class="event-note">@e.Note</div>
+                        }
+                    </div>
+                    <div class="event-left">
+                        <div class="event-count">@Services.EventsStore.FormatLeft(next - _nowLocal, out _)</div>
+                        <div class="event-when">@next.ToString("dd.MM.yyyy HH:mm", _ru)</div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
 </div>
 
 @code {
@@ -61,6 +97,8 @@
     private readonly IReadOnlyList<TimeZoneInfo> _zones = Services.TimeState.GetZones();
 
     private DateTime _now;
+    private DateTime _nowLocal = DateTime.Now;
+    private List<(Services.EventItem e, DateTime next, bool happening, bool overdue)> _events = new();
     private string _format = "24";
     private bool _ntpBusy;
     private bool _ntpOk;
@@ -72,6 +110,7 @@
     private const bool _autostartSupported = false;
 #endif
     private DateTime _lastNtpSync = DateTime.MinValue;
+    private DateTime _lastRebuild = DateTime.MinValue;
     private string? _ntpMessage;
     private bool _disposed;
 
@@ -79,12 +118,41 @@
     {
         _ = LoadAsync();
         _ = TickLoop();
+        Store.Changed += OnStoreChanged;
+        Store.Occurred += OnStoreChanged;
+    }
+
+    private void OnStoreChanged() => OnStoreChanged(null, DateTime.MinValue);
+    private void OnStoreChanged(Services.EventItem? item, DateTime at)
+    {
+        _ = RebuildEventsAsync();
+    }
+
+    private async Task RebuildEventsAsync()
+    {
+        try
+        {
+            var now = DateTime.Now;
+            _events = Store.Events
+                .Select(e => (e, next: Services.EventsStore.NextOccurrence(e, now)))
+                .Where(x => x.next - now <= TimeSpan.FromDays(2) || Services.EventsStore.IsOverdue(x.e, now))
+                .OrderBy(x => x.next)
+                .Take(6)
+                .Select(x => (x.e, x.next,
+                    happening: Services.EventsStore.IsHappening(x.e, now),
+                    overdue: Services.EventsStore.IsOverdue(x.e, now)))
+                .ToList();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (InvalidOperationException) { }
     }
 
     private async Task LoadAsync()
     {
         try
         {
+            await Store.InitAsync(JS);
+            await RebuildEventsAsync();
             var json = await JS.InvokeAsync<string?>("localStorage.getItem", "timetool-clock");
             if (!string.IsNullOrEmpty(json))
             {
@@ -104,6 +172,7 @@
         }
         catch { }
         _now = State.NowInZone();
+        _nowLocal = DateTime.Now;
         await InvokeAsync(StateHasChanged);
         await SyncNtp(); // автоматическая сверка при открытии
     }
@@ -131,8 +200,14 @@
             try
             {
                 _now = State.NowInZone();
+                _nowLocal = DateTime.Now;
                 if (_autoNtp && DateTime.Now - _lastNtpSync > TimeSpan.FromMinutes(15) && !_ntpBusy)
                     await SyncNtp();
+                if (DateTime.Now - _lastRebuild > TimeSpan.FromSeconds(2))
+                {
+                    _lastRebuild = DateTime.Now;
+                    await RebuildEventsAsync();
+                }
                 await InvokeAsync(StateHasChanged);
             }
             catch (InvalidOperationException) { break; } // компонент уничтожен при навигации
@@ -188,6 +263,13 @@
         State.ShowSeconds = e.Value is bool b && b;
         State.NotifyChanged();
         await SaveAsync();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Store.Changed -= OnStoreChanged;
+        Store.Occurred -= OnStoreChanged;
     }
 
     private sealed class ClockSettings

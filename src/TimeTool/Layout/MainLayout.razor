@@ -24,7 +24,7 @@
     @if (_reminder is not null)
     {
         <div class="reminder-banner" role="alert">
-            <span>🔔 <strong>@_reminder.Name</strong> — @(DateTime.Now > _reminderAt ? "сейчас!" : $"осталось {FormatLeft(_reminderAt - DateTime.Now)}") (@_reminderAt.ToString("dd.MM.yyyy HH:mm"))</span>
+            <span>🔔 <strong>@_reminder.Name</strong> — @(DateTime.Now > _reminderAt ? "сейчас!" : $"осталось {FormatLeft(_reminderAt - DateTime.Now)}") (@_reminderAt.ToString("dd.MM.yyyy HH:mm"))@(!string.IsNullOrWhiteSpace(_reminder.Note) ? $" · {_reminder.Note}" : "")</span>
             <button type="button" class="btn btn-small" @onclick="() => _reminder = null">Понятно</button>
         </div>
     }
@@ -67,7 +67,8 @@
                 </section>
                 <section>
                     <h3>События и отсчёты (главная)</h3>
-                    <p>Событие: название, дата, необязательное время, <strong>повтор</strong> (не повторять / каждый день / каждую неделю / каждый месяц / каждый год), <strong>перенос выходных</strong> (если дата попала на субботу/воскресенье — сдвинуть на пятницу или понедельник, например зарплата 25-го, выпавшее на выходные, покажется пятницей) и <strong>напоминание</strong> (за час / 3 часа / 12 часов / день / 3 дня / вовремя). Для ежемесячных событий отсчёт идёт до ближайшего N-го числа и после наступления сам переключается на следующий месяц — удобно для «сколько до зарплаты». Список отсортирован по ближайшей дате и обновляется каждую секунду.</p>
+                    <p>Событие: название, дата, необязательное время, <strong>заметка</strong>, <strong>повтор</strong> (не повторять / каждый день / каждую неделю / каждый месяц / каждый год), <strong>перенос выходных</strong> (если дата попала на субботу/воскресенье — сдвинуть на пятницу или понедельник, например зарплата 25-го, выпавшее на выходные, покажется пятницей) и <strong>напоминание</strong> (за час / 3 часа / 12 часов / день / 3 дня / вовремя). Для ежемесячных событий отсчёт идёт до ближайшего N-го числа и после наступления сам переключается на следующий месяц — удобно для «сколько до зарплаты». Список отсортирован по ближайшей дате и обновляется каждую секунду. Кнопка <strong>«Изменить»</strong> в карточке позволяет отредактировать событие, включая заметку.</p>
+                    <p><strong>Наступление события</strong> — независимо от настроек напоминания: карточка подсвечивается красным с пометкой «наступило!», звучит сигнал, показывается баннер (а на Windows — toast и всплывающее окно трея). Просроченное однократное событие показывает «прошло N мин назад» красным, пока вы его не удалите или не перенесёте через «Изменить». Ближайшие события видны и на вкладке «Часы».</p>
                     <p><strong>Rainmeter:</strong> пока TimeTool запущен (в т.ч. в трее), отсчёты доступны локально по адресу <code>http://127.0.0.1:47777/</code> — HTML-страница, <code>/events.json</code> и <code>/events.txt</code>. Готовые скины для Rainmeter (WebParser без плагинов и WebView2) лежат в папке <code>integrations/Rainmeter</code> репозитория.</p>
                     <p><strong>Умные напоминания:</strong> когда до события остаётся заданное время, вверху приложения появляется баннер со звуковым сигналом. Если приложение было закрыто, напоминание покажется при запуске (если событие прошло не более суток назад). Каждое напоминание срабатывает один раз на наступление. События запоминаются между запусками.</p>
                     <p>Кнопка <strong>«Копировать»</strong> копирует отсчёт в буфер в формате Markdown — вставьте в заметку Obsidian: <code>**Зарплата** — осталось 8 д 3 ч (до 25.12.2026 09:00)</code>.</p>
@@ -108,7 +109,22 @@
     protected override void OnInitialized()
     {
         Store.Remind += OnRemind;
+        Store.Occurred += OnOccurred;
         Timer.Elapsed += OnTimerElapsed;
+    }
+
+    /// <summary>Событие наступило (всегда, независимо от настроек напоминания).</summary>
+    private async void OnOccurred(Services.EventItem item, DateTime at)
+    {
+        _reminder = item;
+        _reminderAt = at;
+        try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+        await PlayEventSoundAsync(item);
+#if WINDOWS
+        var body = $"Событие наступило ({at:dd.MM.yyyy HH:mm})" + (string.IsNullOrWhiteSpace(item.Note) ? "" : $" — {item.Note}");
+        Platforms.Windows.ToastNotifier.Show($"TimeTool: {item.Name}", body);
+        Platforms.Windows.TrayService.ShowBalloon(item.Name, body);
+#endif
     }
 
     /// <summary>Таймер дошёл до нуля: звук + уведомления + баннер. Layout живёт всегда — срабатывает на любой вкладке.</summary>
@@ -257,6 +273,7 @@
     public async ValueTask DisposeAsync()
     {
         Store.Remind -= OnRemind;
+        Store.Occurred -= OnOccurred;
         Timer.Elapsed -= OnTimerElapsed;
         if (_helpReference != null)
         {

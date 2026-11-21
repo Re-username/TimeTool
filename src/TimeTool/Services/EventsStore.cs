@@ -8,9 +8,10 @@ public sealed class EventItem
     public string Name { get; set; } = "";
     public DateTime Date { get; set; } = DateTime.Today.AddDays(7);
     public string Repeat { get; set; } = "none"; // none | monthly | yearly
-    public int RemindLeadMinutes { get; set; } // 0 — без напоминания, -1 — вовремя
+    public int RemindLeadMinutes { get; set; } // 0 — без предварительного напоминания, -1 — вовремя
     public string? SoundPath { get; set; } // кастомный звук напоминания (wav/mp3/ogg), пусто — стандартный
     public string WeekendShift { get; set; } = "none"; // none | friday | monday — перенос выпадения на выходные
+    public string? Note { get; set; } // заметка к событию (редактируется)
 }
 
 /// <summary>События с повторяемостью + движок «умных» напоминаний.</summary>
@@ -27,7 +28,10 @@ public sealed class EventsStore
     public IReadOnlyList<EventItem> Events => _events;
 
     public event Action? Changed;
+    /// <summary>Предварительное напоминание (lead) — только если настроено у события.</summary>
     public event Action<EventItem, DateTime>? Remind;
+    /// <summary>Событие наступило — сигналит ВСЕГДА, независимо от настройки напоминания.</summary>
+    public event Action<EventItem, DateTime>? Occurred;
 
     public async Task InitAsync(IJSRuntime js)
     {
@@ -64,6 +68,17 @@ public sealed class EventsStore
     public async Task RemoveAsync(string id)
     {
         _events.RemoveAll(e => e.Id == id);
+        await SaveAsync();
+        Changed?.Invoke();
+    }
+
+    /// <summary>Обновляет поля события (редактирование, включая заметку).</summary>
+    public async Task UpdateAsync(string id, Action<EventItem> mutate)
+    {
+        var e = _events.FirstOrDefault(x => x.Id == id);
+        if (e is null)
+            return;
+        mutate(e);
         await SaveAsync();
         Changed?.Invoke();
     }
@@ -135,6 +150,22 @@ public sealed class EventsStore
         return shifted > from ? shifted : d;
     }
 
+    /// <summary>
+    /// Событие «наступило сейчас»: момент ближайшего наступления не более
+    /// <paramref name="window"/> назад. Для повторяющихся событий учитывается
+    /// предыдущее наступление (текущее уже «перекатилось» в будущее).
+    /// </summary>
+    public static bool IsHappening(EventItem e, DateTime now, TimeSpan? window = null)
+    {
+        window ??= TimeSpan.FromMinutes(2);
+        var prev = NextOccurrence(e, now - window.Value - TimeSpan.FromSeconds(1));
+        return prev <= now && now - prev <= window.Value;
+    }
+
+    /// <summary>Однократное событие, время которого прошло (для красного «просрочено»).</summary>
+    public static bool IsOverdue(EventItem e, DateTime now)
+        => e.Repeat == "none" && e.Date < now;
+
     private static DateTime ApplyWeekendShift(DateTime d, string mode) => mode switch
     {
         "friday" => d.DayOfWeek == DayOfWeek.Saturday ? d.AddDays(-1)
@@ -150,7 +181,28 @@ public sealed class EventsStore
         return new DateTime(month.Year, month.Month, day, month.Hour, month.Minute, 0);
     }
 
-    /// <summary>Цикл напоминаний: срабатывает заранее (lead) и показывает пропущенные при запуске.</summary>
+    /// <summary>Формат «осталось» без отрицательных значений: просроченное — «прошло … назад».</summary>
+    public static string FormatLeft(TimeSpan left, out bool overdue)
+    {
+        overdue = left < TimeSpan.Zero;
+        if (overdue)
+            left = left.Negate();
+        string s;
+        if (left.TotalDays >= 1)
+            s = $"{(int)left.TotalDays} д {(int)left.Hours} ч {left.Minutes} мин";
+        else if (left.TotalHours >= 1)
+            s = $"{(int)left.TotalHours} ч {left.Minutes} мин";
+        else
+            s = $"{(int)left.TotalMinutes} мин {left.Seconds} с";
+        return overdue ? $"прошло {s} назад" : s;
+    }
+
+    /// <summary>
+    /// Цикл напоминаний. Два независимых срабатывания на каждое наступление:
+    /// «due» — в момент события (ВСЕГДА, вне зависимости от настроек) и
+    /// «lead» — заранее (только если RemindLeadMinutes != 0).
+    /// Пропущенные (приложение было закрыто) показываются при запуске — окно сутки.
+    /// </summary>
     private async Task ReminderLoop()
     {
         while (true)
@@ -160,11 +212,20 @@ public sealed class EventsStore
                 var now = DateTime.Now;
                 foreach (var e in _events.ToList())
                 {
-                    if (e.RemindLeadMinutes == 0)
-                        continue;
                     var next = NextOccurrence(e, now);
                     var key = $"{e.Id}:{next.Ticks}";
-                    if (_fired.Contains(key))
+
+                    // наступление — сигналим всегда, даже без настроенного напоминания
+                    if (now >= next && now - next <= TimeSpan.FromHours(24) && _fired.Add(key + ":due"))
+                    {
+                        TrimFired();
+                        _ = SaveFiredAsync();
+                        Occurred?.Invoke(e, next);
+                    }
+
+                    if (e.RemindLeadMinutes == 0)
+                        continue;
+                    if (_fired.Contains(key + ":lead"))
                         continue;
 
                     bool due;
@@ -182,9 +243,8 @@ public sealed class EventsStore
 
                     if (due)
                     {
-                        _fired.Add(key);
-                        if (_fired.Count > 500)
-                            _fired.Remove(_fired.First());
+                        _fired.Add(key + ":lead");
+                        TrimFired();
                         _ = SaveFiredAsync();
                         Remind?.Invoke(e, next);
                     }
@@ -193,5 +253,11 @@ public sealed class EventsStore
             catch { }
             await Task.Delay(20_000);
         }
+    }
+
+    private void TrimFired()
+    {
+        while (_fired.Count > 500)
+            _fired.Remove(_fired.First());
     }
 }

@@ -55,8 +55,25 @@
                 <input @bind="_soundPath" placeholder="не выбран" />
             </label>
             <button type="button" class="btn form-btn" @onclick="PickSound">Обзор…</button>
-            <button type="button" class="btn primary form-btn" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_name)">Добавить</button>
         </div>
+        <div class="shift-row">
+            <label class="grow2">Заметка
+                <input @bind="_note" placeholder="Необязательно: комментарий к событию" />
+            </label>
+            @if (_editingId is null)
+            {
+                <button type="button" class="btn primary form-btn" @onclick="Add" disabled="@string.IsNullOrWhiteSpace(_name)">Добавить</button>
+            }
+            else
+            {
+                <button type="button" class="btn primary form-btn" @onclick="SaveEdit" disabled="@string.IsNullOrWhiteSpace(_name)">Сохранить</button>
+                <button type="button" class="btn form-btn" @onclick="CancelEdit">Отмена</button>
+            }
+        </div>
+        @if (_editingId is not null)
+        {
+            <div class="alert info" style="margin-top:8px;">Редактируется событие — изменения применятся после «Сохранить».</div>
+        }
     </div>
 
     @if (Store.Events.Count == 0)
@@ -70,9 +87,18 @@
             {
                 var next = Services.EventsStore.NextOccurrence(e, _now);
                 var left = next - _now;
-                <div class="event-card">
+                var happening = Services.EventsStore.IsHappening(e, _now);
+                var overdue = Services.EventsStore.IsOverdue(e, _now);
+                var css = "event-card" + (happening ? " due" : overdue ? " overdue" : "");
+                <div class="@css">
                     <div class="event-main">
-                        <div class="event-name">@e.Name</div>
+                        <div class="event-name">
+                            @e.Name
+                            @if (happening)
+                            {
+                                <span class="due-badge">наступило!</span>
+                            }
+                        </div>
                         <div class="event-when">
                             @(e.Repeat switch
                             {
@@ -92,16 +118,21 @@
                                 <span> · выходные → понедельник</span>
                             }
                         </div>
+                        @if (!string.IsNullOrWhiteSpace(e.Note))
+                        {
+                            <div class="event-note">@e.Note</div>
+                        }
                         @if (e.RemindLeadMinutes != 0)
                         {
                             <div class="event-when">напоминание @(e.RemindLeadMinutes < 0 ? "вовремя" : $"за {LeadText(e.RemindLeadMinutes)}")</div>
                         }
                     </div>
                     <div class="event-left">
-                        <div class="event-count">@FormatLeft(left)</div>
+                        <div class="event-count">@Services.EventsStore.FormatLeft(left, out var wasOverdue)</div>
                         <div class="event-when">@left.TotalDays.ToString("0.#") дней</div>
                     </div>
                     <div class="event-actions">
+                        <button type="button" class="btn btn-small" @onclick="() => Edit(e)" title="Изменить (название, дату, заметку…)">Изменить</button>
                         <button type="button" class="btn btn-small" @onclick="() => CopyEvent(e, next, left)" title="Скопировать отсчёт в буфер (markdown — для Obsidian)">Копировать</button>
                         <button type="button" class="btn btn-small danger" @onclick="() => Remove(e)" title="Удалить">✕</button>
                     </div>
@@ -121,6 +152,8 @@
     private string _weekend = "none";
     private string _remind = "1440";
     private string _soundPath = "";
+    private string _note = "";
+    private string? _editingId;
     private DateTime _now = DateTime.Now;
     private bool _disposed;
 
@@ -160,8 +193,49 @@
             WeekendShift = _weekend,
             RemindLeadMinutes = int.TryParse(_remind, out var r) ? r : 0,
             SoundPath = string.IsNullOrWhiteSpace(_soundPath) ? null : _soundPath.Trim(),
+            Note = string.IsNullOrWhiteSpace(_note) ? null : _note.Trim(),
         });
         _name = "";
+        _note = "";
+    }
+
+    private void Edit(Services.EventItem e)
+    {
+        _editingId = e.Id;
+        _name = e.Name;
+        _date = e.Date;
+        _time = e.Date;
+        _repeat = e.Repeat;
+        _weekend = e.WeekendShift;
+        _remind = e.RemindLeadMinutes.ToString();
+        _soundPath = e.SoundPath ?? "";
+        _note = e.Note ?? "";
+    }
+
+    private async Task SaveEdit()
+    {
+        if (_editingId is null)
+            return;
+        var id = _editingId;
+        await Store.UpdateAsync(id, e =>
+        {
+            e.Name = _name.Trim();
+            e.Date = _date.Date + _time.TimeOfDay;
+            e.Repeat = _repeat;
+            e.WeekendShift = _weekend;
+            e.RemindLeadMinutes = int.TryParse(_remind, out var r) ? r : 0;
+            e.SoundPath = string.IsNullOrWhiteSpace(_soundPath) ? null : _soundPath.Trim();
+            e.Note = string.IsNullOrWhiteSpace(_note) ? null : _note.Trim();
+        });
+        CancelEdit();
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _name = "";
+        _note = "";
+        _soundPath = "";
     }
 
     private async Task PickSound()
@@ -177,7 +251,9 @@
 
     private async Task CopyEvent(Services.EventItem e, DateTime next, TimeSpan left)
     {
-        var md = $"**{e.Name}** — осталось {FormatLeft(left)} (до {next.ToString("dd.MM.yyyy HH:mm", _ru)})";
+        var md = $"**{e.Name}** — осталось {Services.EventsStore.FormatLeft(left, out _)} (до {next.ToString("dd.MM.yyyy HH:mm", _ru)})";
+        if (!string.IsNullOrWhiteSpace(e.Note))
+            md += $"\n> {e.Note}";
         try { await JS.InvokeAsync<object>("navigator.clipboard.writeText", md); } catch { }
     }
 
@@ -201,13 +277,4 @@
         4320 => "3 дней",
         _ => $"{minutes} мин",
     };
-
-    private static string FormatLeft(TimeSpan left)
-    {
-        if (left.TotalDays >= 1)
-            return $"{(int)left.TotalDays} д {(int)left.Hours} ч {left.Minutes} мин";
-        if (left.TotalHours >= 1)
-            return $"{(int)left.TotalHours} ч {left.Minutes} мин";
-        return $"{(int)left.TotalMinutes} мин {left.Seconds} с";
-    }
 }

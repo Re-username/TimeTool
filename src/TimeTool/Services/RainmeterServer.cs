@@ -115,7 +115,7 @@ public sealed class RainmeterServer
         }
     }
 
-    private sealed record EventDto(string Name, string Next, double DaysLeft, string Left, string Repeat, string WeekendShift);
+    private sealed record EventDto(string Name, string Next, double DaysLeft, string Left, string Repeat, string WeekendShift, string? Note, bool Happening, bool Overdue);
 
     private List<EventDto> Snapshot()
     {
@@ -127,9 +127,12 @@ public sealed class RainmeterServer
                 x.e.Name,
                 x.next.ToString("dd.MM.yyyy HH:mm"),
                 Math.Round((x.next - now).TotalDays, 1),
-                FormatLeft(x.next - now),
+                EventsStore.FormatLeft(x.next - now, out _),
                 x.e.Repeat,
-                x.e.WeekendShift))
+                x.e.WeekendShift,
+                x.e.Note,
+                EventsStore.IsHappening(x.e, now),
+                EventsStore.IsOverdue(x.e, now)))
             .ToList();
     }
 
@@ -163,15 +166,6 @@ public sealed class RainmeterServer
         foreach (var e in Snapshot())
             sb.Append(e.Name.Replace('|', '/')).Append('|').Append(e.Next).Append('|').Append(e.Left).Append('\n');
         return sb.ToString();
-    }
-
-    private static string FormatLeft(TimeSpan left)
-    {
-        if (left.TotalDays >= 1)
-            return $"{(int)left.TotalDays} дн {(int)left.Hours} ч";
-        if (left.TotalHours >= 1)
-            return $"{(int)left.TotalHours} ч {left.Minutes} мин";
-        return $"{(int)left.TotalMinutes} мин";
     }
 
     private static string HtmlPage() => """
