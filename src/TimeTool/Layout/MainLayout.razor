@@ -5,6 +5,7 @@
 @inject Services.EventsStore Store
 @inject NavigationManager Nav
 @inject Services.TimerEngine Timer
+@inject Services.UpdateChecker Updates
 @implements IAsyncDisposable
 
 <div class="layout">
@@ -33,6 +34,17 @@
         <div class="reminder-banner" role="alert">
             <span>🔔 <strong>Таймер</strong> — время вышло!</span>
             <button type="button" class="btn btn-small" @onclick="() => _timerElapsed = false">Понятно</button>
+        </div>
+    }
+
+    @if (_updateDismissed != true && Updates.HasUpdate)
+    {
+        <div class="reminder-banner update" role="alert">
+            <span>⬆ Доступна новая версия <strong>TimeTool @Updates.LatestVersion</strong> (у вас @Services.UpdateChecker.CurrentVersion)</span>
+            <span style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-small primary" @onclick="OpenUpdate">Скачать</button>
+                <button type="button" class="btn btn-small" @onclick="DismissUpdate">Позже</button>
+            </span>
         </div>
     }
 
@@ -89,6 +101,7 @@
                 <section>
                     <h3>Общее</h3>
                     <p>Тема (тёмная/светлая) запоминается. Горячие клавиши: <kbd>F1</kbd> — справка, <kbd>Esc</kbd> — закрыть справку.</p>
+                    <p class="version-line">Версия @Services.UpdateChecker.CurrentVersion@(Updates.HasUpdate ? $" · доступна @Updates.LatestVersion" : " · актуальная")@(Updates.CheckFinished ? "" : " · проверяю…")</p>
                 </section>
             </div>
         </section>
@@ -103,6 +116,7 @@
     private Services.EventItem? _reminder;
     private DateTime _reminderAt;
     private bool _timerElapsed;
+    private bool? _updateDismissed;
     private DotNetObjectReference<MainLayout>? _helpReference;
     private ElementReference HelpCloseButton;
 
@@ -111,7 +125,28 @@
         Store.Remind += OnRemind;
         Store.Occurred += OnOccurred;
         Timer.Elapsed += OnTimerElapsed;
+        Updates.Changed += OnUpdateChanged;
     }
+
+    private void OnUpdateChanged()
+    {
+        try { InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+    }
+
+    private async Task OpenUpdate()
+    {
+        if (!string.IsNullOrEmpty(Updates.LatestUrl))
+        {
+            try { await JS.InvokeVoidAsync("open", Updates.LatestUrl, "_blank"); } catch { }
+#if WINDOWS
+            try { await Microsoft.Maui.ApplicationModel.Launcher.OpenAsync(Updates.LatestUrl); } catch { }
+#endif
+        }
+        _updateDismissed = true;
+        try { await InvokeAsync(StateHasChanged); } catch (InvalidOperationException) { }
+    }
+
+    private void DismissUpdate() => _updateDismissed = true;
 
     /// <summary>Событие наступило (всегда, независимо от настроек напоминания).</summary>
     private async void OnOccurred(Services.EventItem item, DateTime at)
@@ -225,6 +260,7 @@
             }
             catch (Exception ex) when (ex is JSException or InvalidOperationException or JSDisconnectedException) { }
             await Store.InitAsync(JS);
+            _ = Updates.CheckAsync(); // проверка обновлений в фоне
             StateHasChanged();
         }
 
@@ -275,6 +311,7 @@
         Store.Remind -= OnRemind;
         Store.Occurred -= OnOccurred;
         Timer.Elapsed -= OnTimerElapsed;
+        Updates.Changed -= OnUpdateChanged;
         if (_helpReference != null)
         {
             try { await JS.InvokeVoidAsync("timeToolHotkeys.dispose"); }

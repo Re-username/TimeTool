@@ -21,8 +21,8 @@
     <ApplicationIcon>Resources\app.ico</ApplicationIcon>
 
     <!-- Versions -->
-    <ApplicationDisplayVersion>1.4.8</ApplicationDisplayVersion>
-    <ApplicationVersion>12</ApplicationVersion>
+    <ApplicationDisplayVersion>1.4.9</ApplicationDisplayVersion>
+    <ApplicationVersion>13</ApplicationVersion>
 
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>

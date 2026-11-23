@@ -325,3 +325,5 @@ span.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13p
    фиксируем высоту, чтобы все поля формы были ровно одного размера */
 .shift-row input, .shift-row select { height: 36px; box-sizing: border-box; }
 .form-btn { height: 36px; }
+.reminder-banner.update { border-color: var(--accent); }
+.version-line { color: var(--text-soft); font-size: 12px; margin-top: 8px; }

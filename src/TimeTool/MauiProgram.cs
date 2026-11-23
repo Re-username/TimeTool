@@ -20,6 +20,7 @@ public static class MauiProgram
         builder.Services.AddSingleton<Services.TimeState>();
         builder.Services.AddSingleton<Services.EventsStore>();
         builder.Services.AddSingleton<Services.TimerEngine>();
+        builder.Services.AddSingleton<Services.UpdateChecker>();
 
 #if ANDROID
         // Звук таймера срабатывает без жеста пользователя (сработка по прошествии времени)
